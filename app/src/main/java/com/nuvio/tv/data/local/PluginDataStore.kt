@@ -16,8 +16,10 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import java.io.File
 import javax.inject.Inject
@@ -37,12 +39,32 @@ class PluginDataStore @Inject constructor(
     }
 
     private fun effectiveProfileId(): Int {
+        PluginSyncProfile.current()?.let { return it }
         val active = profileManager.activeProfile
-        return if (active != null && active.usesPrimaryPlugins) 1 else profileManager.activeProfileId.value
+        return effectivePluginProfileId(
+            usesPrimaryPlugins = active?.usesPrimaryPlugins == true,
+            activeProfileId = profileManager.activeProfileId.value
+        )
     }
 
     private fun store(profileId: Int = effectiveProfileId()) =
         factory.get(profileId, FEATURE)
+
+    /** A pinned sync writes the profile it started for, including after the active profile changes. */
+    private fun sharedPluginWriteBlocked(): Boolean {
+        if (PluginSyncProfile.current() != null) return false
+        val active = profileManager.activeProfile
+        return active != null && !active.isPrimary && active.usesPrimaryPlugins
+    }
+
+    private fun <T> profileState(read: (Int) -> Flow<T>): Flow<T> = flow {
+        val pinned = PluginSyncProfile.current()
+        if (pinned != null) {
+            emitAll(read(pinned))
+        } else {
+            emitAll(effectiveProfileIdFlow.flatMapLatest(read))
+        }
+    }
 
     private val effectiveProfileIdFlow: Flow<Int> = combine(
         profileManager.activeProfileId,
@@ -79,7 +101,7 @@ class PluginDataStore @Inject constructor(
     }
 
     // Repositories
-    val repositories: Flow<List<PluginRepository>> = effectiveProfileIdFlow.flatMapLatest { pid ->
+    val repositories: Flow<List<PluginRepository>> = profileState { pid ->
         factory.get(pid, FEATURE).data
             .map { it[repositoriesKey] }
             .distinctUntilChanged()
@@ -94,8 +116,7 @@ class PluginDataStore @Inject constructor(
     }.flowOn(Dispatchers.Default)
 
     suspend fun saveRepositories(repos: List<PluginRepository>) {
-            val active = profileManager.activeProfile
-            if (active != null && !active.isPrimary && active.usesPrimaryPlugins) return
+            if (sharedPluginWriteBlocked()) return
         val json = moshi.adapter<List<PluginRepository>>(repoListType).toJson(repos)
         store().edit { prefs ->
             prefs[repositoriesKey] = json
@@ -103,8 +124,7 @@ class PluginDataStore @Inject constructor(
     }
 
     suspend fun addRepository(repo: PluginRepository) {
-            val active = profileManager.activeProfile
-            if (active != null && !active.isPrimary && active.usesPrimaryPlugins) return
+            if (sharedPluginWriteBlocked()) return
         val current = repositories.first().toMutableList()
         current.removeAll { it.id == repo.id }
         current.add(repo)
@@ -112,8 +132,7 @@ class PluginDataStore @Inject constructor(
     }
 
     suspend fun removeRepository(repoId: String) {
-            val active = profileManager.activeProfile
-            if (active != null && !active.isPrimary && active.usesPrimaryPlugins) return
+            if (sharedPluginWriteBlocked()) return
         val current = repositories.first().toMutableList()
         current.removeAll { it.id == repoId }
         saveRepositories(current)
@@ -132,7 +151,7 @@ class PluginDataStore @Inject constructor(
     }
 
     // Scrapers
-    val scrapers: Flow<List<ScraperInfo>> = effectiveProfileIdFlow.flatMapLatest { pid ->
+    val scrapers: Flow<List<ScraperInfo>> = profileState { pid ->
         factory.get(pid, FEATURE).data
             .map { it[scrapersKey] }
             .distinctUntilChanged()
@@ -147,8 +166,7 @@ class PluginDataStore @Inject constructor(
     }.flowOn(Dispatchers.Default)
 
     suspend fun saveScrapers(scrapers: List<ScraperInfo>) {
-            val active = profileManager.activeProfile
-            if (active != null && !active.isPrimary && active.usesPrimaryPlugins) return
+            if (sharedPluginWriteBlocked()) return
         val json = moshi.adapter<List<ScraperInfo>>(scraperListType).toJson(scrapers)
         store().edit { prefs ->
             prefs[scrapersKey] = json
@@ -168,29 +186,27 @@ class PluginDataStore @Inject constructor(
     }
 
     // Plugins enabled global toggle
-    val pluginsEnabled: Flow<Boolean> = effectiveProfileIdFlow.flatMapLatest { pid ->
+    val pluginsEnabled: Flow<Boolean> = profileState { pid ->
         factory.get(pid, FEATURE).data.map { prefs ->
             prefs[pluginsEnabledKey] ?: true
         }
     }
 
     suspend fun setPluginsEnabled(enabled: Boolean) {
-            val active = profileManager.activeProfile
-            if (active != null && !active.isPrimary && active.usesPrimaryPlugins) return
+            if (sharedPluginWriteBlocked()) return
         store().edit { prefs ->
             prefs[pluginsEnabledKey] = enabled
         }
     }
 
-    val groupStreamsByRepository: Flow<Boolean> = effectiveProfileIdFlow.flatMapLatest { pid ->
+    val groupStreamsByRepository: Flow<Boolean> = profileState { pid ->
         factory.get(pid, FEATURE).data.map { prefs ->
             prefs[groupStreamsByRepositoryKey] ?: false
         }
     }
 
     suspend fun setGroupStreamsByRepository(enabled: Boolean) {
-            val active = profileManager.activeProfile
-            if (active != null && !active.isPrimary && active.usesPrimaryPlugins) return
+            if (sharedPluginWriteBlocked()) return
         store().edit { prefs ->
             prefs[groupStreamsByRepositoryKey] = enabled
         }
