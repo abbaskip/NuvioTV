@@ -342,7 +342,10 @@ class ProfileSettingsPluginSyncTest {
             mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)
         )
         services += service
-        val plugins = PluginDataStore(mockk(relaxed = true), Moshi.Builder().build(), factory, profileManager)
+        val context = mockk<android.content.Context>(relaxed = true)
+        val moshi = Moshi.Builder().build()
+        every { Dispatchers.Default } returns dispatcher
+        val plugins = PluginDataStore(context, moshi, factory, profileManager)
         return Harness(service, plugins, factory, activeProfileId, remote, pulls, pushes)
     }
 

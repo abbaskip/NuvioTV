@@ -49,7 +49,6 @@ class PluginSyncProfileTest {
     fun setUp() {
         mockkStatic(Dispatchers::class)
         every { Dispatchers.IO } returns dispatcher
-        every { Dispatchers.Default } returns dispatcher
     }
 
     @After
@@ -169,12 +168,10 @@ class PluginSyncProfileTest {
             }
             PostgrestResult("", Headers.Empty, postgrest)
         }
-        val plugins = PluginDataStore(
-            mockk(relaxed = true),
-            Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build(),
-            factory,
-            profileManager
-        )
+        val context = mockk<android.content.Context>(relaxed = true)
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        every { Dispatchers.Default } returns dispatcher
+        val plugins = PluginDataStore(context, moshi, factory, profileManager)
         val service = PluginSyncService(
             postgrest,
             authManager,
