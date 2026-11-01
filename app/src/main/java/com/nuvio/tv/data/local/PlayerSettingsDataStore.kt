@@ -334,6 +334,7 @@ data class PlayerSettings(
     val nextEpisodeThresholdMode: NextEpisodeThresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
     val nextEpisodeThresholdPercent: Float = 99f,
     val nextEpisodeThresholdMinutesBeforeEnd: Float = 2f,
+    val promptToRateAfterWatching: Boolean = false,
     val streamReuseLastLinkEnabled: Boolean = true,
     val streamReuseLastLinkCacheHours: Int = 1,
     val externalPlayerForwardSubtitles: Boolean = false,
@@ -660,6 +661,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val nextEpisodeThresholdMinutesBeforeEndLegacyKey = intPreferencesKey("next_episode_threshold_minutes_before_end")
     private val nextEpisodeThresholdPercentKey = floatPreferencesKey("next_episode_threshold_percent_v2")
     private val nextEpisodeThresholdMinutesBeforeEndKey = floatPreferencesKey("next_episode_threshold_minutes_before_end_v2")
+    private val promptToRateAfterWatchingKey = booleanPreferencesKey("prompt_to_rate_after_watching")
     private val streamReuseLastLinkEnabledKey = booleanPreferencesKey("stream_reuse_last_link_enabled")
     private val streamReuseLastLinkCacheHoursKey = intPreferencesKey("stream_reuse_last_link_cache_hours")
     private val externalPlayerForwardSubtitlesKey = booleanPreferencesKey("external_player_forward_subtitles")
@@ -1084,6 +1086,7 @@ class PlayerSettingsDataStore @Inject constructor(
                     min = 0f,
                     max = 3.5f
                 ),
+                promptToRateAfterWatching = prefs[promptToRateAfterWatchingKey] ?: false,
                 streamReuseLastLinkEnabled = prefs[streamReuseLastLinkEnabledKey] ?: false,
                 streamReuseLastLinkCacheHours = (prefs[streamReuseLastLinkCacheHoursKey] ?: 24).coerceIn(1, 168),
                 externalPlayerForwardSubtitles = prefs[externalPlayerForwardSubtitlesKey] ?: false,
@@ -1512,6 +1515,10 @@ class PlayerSettingsDataStore @Inject constructor(
 
     private fun normalizeHalfStep(value: Float, min: Float, max: Float): Float {
         return (value.coerceIn(min, max) * 2f).roundToInt() / 2f
+    }
+
+    suspend fun setPromptToRateAfterWatching(enabled: Boolean) {
+        store().edit { it[promptToRateAfterWatchingKey] = enabled }
     }
 
     suspend fun setStreamReuseLastLinkEnabled(enabled: Boolean) {

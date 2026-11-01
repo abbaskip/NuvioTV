@@ -212,6 +212,10 @@ class PlayerViewModel @Inject constructor(
     val postPlayRecommendationUiState: StateFlow<PostPlayRecommendationUiState>
         get() = postPlayRecommendationController.uiState
 
+    val promptToRateAfterWatching = playerSettingsDataStore.playerSettings.map { it.promptToRateAfterWatching }
+    internal fun completedMovieRatingRequest(): com.nuvio.tv.core.tracking.MovieRatingRequest? =
+        controller.contentId?.let { com.nuvio.tv.core.tracking.MovieRatingRequest(controller.profileId, it, controller.title) }
+
     val effectiveAutoplayEnabled = playerSettingsDataStore.playerSettings
         .map(StreamAutoPlayPolicy::isEffectivelyEnabled)
         .distinctUntilChanged()

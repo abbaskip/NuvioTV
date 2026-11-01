@@ -380,4 +380,23 @@ interface TraktApi {
         @Header("Authorization") authorization: String,
         @Body body: TraktListItemsMutationRequestDto
     ): Response<TraktListItemsMutationResponseDto>
+    @GET("sync/ratings/{type}")
+    suspend fun getPersonalRatings(
+        @Header("Authorization") authorization: String,
+        @Path("type") type: String,
+        @Query("page") page: Int,
+        @Query("limit") limit: Int = 1000
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("sync/ratings")
+    suspend fun setPersonalRating(
+        @Header("Authorization") authorization: String,
+        @Body body: okhttp3.RequestBody
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("sync/ratings/remove")
+    suspend fun removePersonalRating(
+        @Header("Authorization") authorization: String,
+        @Body body: okhttp3.RequestBody
+    ): Response<okhttp3.ResponseBody>
 }

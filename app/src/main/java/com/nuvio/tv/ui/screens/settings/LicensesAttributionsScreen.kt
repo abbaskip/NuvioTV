@@ -359,6 +359,11 @@ private fun appLicenseItem() = LicenseAttributionItem(
 @Composable
 private fun dataAttributionItems() = listOf(
     LicenseAttributionItem(
+        title = "Nuvio Mobile Enhanced",
+        body = "Personal-rating API behaviour adapted under GPL-3.0, using Nuvio's existing tracker clients. Independent projects; no endorsement implied.",
+        url = "https://github.com/luqmanfadlli/NuvioMobile-Enhanced"
+    ),
+    LicenseAttributionItem(
         title = stringResource(R.string.licenses_attributions_iptv_title),
         body = stringResource(R.string.licenses_attributions_iptv_body),
         url = "https://github.com/homelessbrian/NuvioPlusIPTV"

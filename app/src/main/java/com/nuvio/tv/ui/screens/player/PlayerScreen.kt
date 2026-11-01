@@ -208,11 +208,21 @@ fun PlayerScreen(
     onBackPress: (currentVideoId: String?, currentSeason: Int?, currentEpisode: Int?, autoPlayEnabled: Boolean, playbackCompleted: Boolean) -> Unit,
     onPlaybackErrorBack: () -> Unit = { onBackPress(null, null, null, false, false) },
     onPlaybackEnded: ((nextVideoId: String?, nextSeason: Int?, nextEpisode: Int?, exitReason: PlayerExitReason?) -> Unit)? = null,
+    onMovieCompleted: (com.nuvio.tv.core.tracking.MovieRatingRequest) -> Unit = {},
     onPlayRecommendation: (PostPlayRecommendation, manualSelection: Boolean) -> Unit = { _, _ -> },
     onOpenRecommendationDetails: (PostPlayRecommendation) -> Unit = {},
     onOpenPartyMedia: (PartyMedia) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val promptForRating by viewModel.promptToRateAfterWatching.collectAsState(initial = false)
+    var movieCompletionReported by androidx.compose.runtime.saveable.rememberSaveable(uiState.currentVideoId) { mutableStateOf(false) }
+    LaunchedEffect(uiState.playbackEnded, uiState.error, uiState.currentVideoId, promptForRating) {
+        if (!movieCompletionReported && uiState.currentVideoId != null && com.nuvio.tv.core.tracking.shouldRequestMovieRating(
+                promptForRating, uiState.contentType, uiState.playbackEnded, uiState.error != null)) {
+            movieCompletionReported = true
+            viewModel.completedMovieRatingRequest()?.let(onMovieCompleted)
+        }
+    }
     val playerBadges = rememberPlayerBadges(viewModel, uiState)
     val partyState by viewModel.party.state.collectAsState()
     val partyPlayback by viewModel.party.playback.collectAsState()

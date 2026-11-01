@@ -305,6 +305,8 @@ fun HeroContentSection(
                             )
                         }
 
+                        PersonalRatingButton(meta)
+
                         if (trailerAvailable) {
                             ActionIconButtonPainter(
                                 painter = trailerPainter,

@@ -562,6 +562,10 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setNextEpisodeThresholdMinutesBeforeEnd(minutes)
     }
 
+    suspend fun setPromptToRateAfterWatching(enabled: Boolean) {
+        playerSettingsDataStore.setPromptToRateAfterWatching(enabled)
+    }
+
     suspend fun setStreamReuseLastLinkEnabled(enabled: Boolean) {
         playerSettingsDataStore.setStreamReuseLastLinkEnabled(enabled)
     }

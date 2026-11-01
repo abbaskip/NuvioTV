@@ -23,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
@@ -87,6 +88,17 @@ private fun PlaybackNavHost(
     startDestination: String,
     hideBuiltInHeaders: Boolean
 ) {
+    var completedMovie by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.nuvio.tv.core.tracking.MovieRatingRequest?>(null) }
+    val currentEntry by navController.currentBackStackEntryAsState()
+    val route = currentEntry?.destination?.route
+    androidx.compose.runtime.LaunchedEffect(route) {
+        if (route?.startsWith("livetv/") == true || route?.startsWith("party") == true) completedMovie = null
+    }
+    val pendingMovie = completedMovie
+    com.nuvio.tv.ui.screens.detail.MovieRatingPromptHost(pendingMovie,
+        canShow = route != null && !route.startsWith("player/") && !route.startsWith("stream/") && !route.startsWith("livetv/") && !route.startsWith("party")) {
+        if (completedMovie == pendingMovie) completedMovie = null
+    }
     com.nuvio.tv.livetv.sports.SportsHost(navController)
     val playbackAvailability = LocalPlaybackAvailability.current
     val context = LocalContext.current
@@ -970,6 +982,7 @@ private fun PlaybackNavHost(
             }
 
             PlayerScreen(
+                onMovieCompleted = { completedMovie = it },
                 onBackPress = { currentVideoId, currentSeason, currentEpisode, autoPlayEnabled, playbackCompleted ->
                     val args = backStackEntry.arguments
                     val initialSeason = args?.getString("season")?.toIntOrNull()

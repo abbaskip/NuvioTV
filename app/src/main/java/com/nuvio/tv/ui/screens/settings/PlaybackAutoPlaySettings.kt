@@ -77,6 +77,9 @@ internal fun PlaybackStreamSelectionSection(
     onUpdate: PlaybackSettingsUpdate,
     onOpenDialog: (PlaybackDialog) -> Unit
 ) {
+    com.nuvio.tv.ui.screens.detail.PersonalRatingPromptSetting(settings.promptToRateAfterWatching) {
+        onUpdate { setPromptToRateAfterWatching(!settings.promptToRateAfterWatching) }
+    }
     val effectiveAutoPlaySource = if (
         !AppFeaturePolicy.pluginsEnabled &&
         settings.streamAutoPlaySource == StreamAutoPlaySource.ENABLED_PLUGINS_ONLY

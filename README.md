@@ -45,11 +45,21 @@ A shared catalogue is refreshed by this repository’s scheduled GitHub workflow
 
 Optional Gemini assistance uses **your own key**, entered in Settings. It is not required for ordinary deterministic channel matching, and its suggestions are not treated as verified broadcast evidence. No personal Gemini or TVDB key is supplied with the app.
 
+## Configuration backup and personal ratings
+
+The development build adds **Google Drive backup and sync** in Live TV settings. Connect Google Drive on each TV using the on-screen code. Manual backup/restore and debounced automatic sync carry playlists and connection settings, guide mappings, channel customisations, Sports Hub preferences and each profile's non-default TVDB order IDs. Temporarily unavailable orders are retained. Use matching Nuvio profile IDs and names on both devices; restore stops rather than assigning one person's choices to another profile.
+
+The backup includes private playlist credentials. ReSeq never shares it; don't share the file yourself. Personal TVDB/Gemini keys, tracker sessions, learned episode mappings and playback caches are not copied. Conflicting changes stop sync and are reported rather than silently overwriting settings. Automatic checks run while ReSeq is open, not as an always-running background service. Explicit Restore uses the saved configuration, so review the confirmation first.
+
+**Rate** on movie and series details reads your personal ratings and submits changes to all eligible signed-in Trakt, Simkl and MDBList accounts, independently of your Continue Watching source. Half-star choices map to their 1–10 scales. Each service confirms its own result; failures are reported separately. Removing a rating uses the rating-removal API, not history deletion. Simkl itself may add a newly rated title to a watching/completed list according to its API rules.
+
+An optional **Prompt to rate after watching** setting is off by default. It prompts after returning from a movie that reached playback completion, not after episodes or early stops. Rating controls require a supported title identity and a compatible connected tracker.
+
 ## Install and update
 
 Download the **universal APK** from this repository’s [GitHub Releases](https://github.com/abbaskip/Nuvio-ReSeq/releases/latest), transfer it to your Android TV device and allow installation from your chosen installer. Android 7.0 or later is required. Release pages include a SHA-256 checksum.
 
-ReSeq installs alongside official Nuvio and existing Nuvio Debug installations. Its permanent package ID is `io.github.abbaskip.nuvioreseq`. Settings and login sessions are separate; signing into the same Nuvio account can restore supported cloud data, but device settings, TVDB credentials/order selections and some integration logins require setup again.
+ReSeq installs alongside official Nuvio and existing Nuvio Debug installations. Its permanent package ID is `io.github.abbaskip.nuvioreseq`. Settings and login sessions are separate. Signing into the same Nuvio account restores supported cloud data; Google Drive can carry the configuration described above. Personal API keys and integration sessions still require setup on each device.
 
 In-app updates check **only this repository**. There is one release channel: versions labelled beta are published as ordinary GitHub Releases. Install future signed ReSeq releases over the existing app to retain its data. Do not uninstall first.
 
@@ -72,10 +82,12 @@ Use Android Studio, JDK 21 and the Android SDK. Copy `local.example.properties` 
 
 Debug builds have a separate package ID. Signed releases require a private keystore and the `NUVIO_RELEASE_STORE_FILE`, `NUVIO_RELEASE_KEY_ALIAS`, `NUVIO_RELEASE_STORE_PASSWORD` and `NUVIO_RELEASE_KEY_PASSWORD` environment variables (or ignored local properties). Public ReSeq APKs use a permanent release certificate. Build configuration embedded in an APK is extractable; never supply personal account tokens or confidential backend credentials.
 
+For optional Google Drive support, enable the Drive API and create a **TVs and Limited Input devices** OAuth client. Supply `GOOGLE_DRIVE_CLIENT_ID` and `GOOGLE_DRIVE_CLIENT_SECRET` through ignored local properties or environment variables. This device flow does not use an Android package/signature OAuth registration. External projects in Testing must list authorised test users and may require reconnection after Google's testing token expiry. See [Google's device-flow documentation](https://developers.google.com/identity/protocols/oauth2/limited-input-device). Keep downloaded client configuration outside Git; installed-app configuration is extractable from an APK.
+
 [Privacy and data handling](PRIVACY.md). Some service authorisation pages may identify the existing Nuvio integration.
 
 ## Credits and licence
 
-Nuvio ReSeq is maintained by [abbaskip](https://github.com/abbaskip). It is based on [Nuvio by Tapframe and contributors](https://github.com/NuvioMedia/NuvioTV), whose work makes this fork possible. Substantial Live TV, EPG, playback, Sports Hub and related code is incorporated and adapted from [Nuvio + IPTV by homelessbrian and contributors](https://github.com/homelessbrian/NuvioPlusIPTV); see [the incorporation and modification notice](NOTICE-IPTV.md). ReSeq is not an official release of, or endorsed by, either project.
+Nuvio ReSeq is maintained by [abbaskip](https://github.com/abbaskip). It is based on [Nuvio by Tapframe and contributors](https://github.com/NuvioMedia/NuvioTV), whose work makes this fork possible. Substantial Live TV, EPG, playback, Sports Hub and related code is incorporated and adapted from [Nuvio + IPTV by homelessbrian and contributors](https://github.com/homelessbrian/NuvioPlusIPTV); see [the incorporation and modification notice](NOTICE-IPTV.md). Personal-rating API behaviour was also adapted from [Nuvio Mobile Enhanced](https://github.com/luqmanfadlli/NuvioMobile-Enhanced), using ReSeq’s existing authenticated tracker clients. ReSeq is not an official release of, or endorsed by, these projects.
 
 Source code is distributed under the [GNU General Public License v3.0](LICENSE). Existing third-party notices and in-app licences are retained. TheTVDB, TMDB, Trakt, Simkl, MDBList and other services retain their respective names, data rights and terms; their use does not imply endorsement.
