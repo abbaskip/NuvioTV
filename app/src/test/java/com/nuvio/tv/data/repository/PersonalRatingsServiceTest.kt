@@ -100,6 +100,35 @@ class PersonalRatingsServiceTest {
         assertFalse(service.write(target, session.copy(providers = setOf(PersonalRatingProvider.SIMKL)), null).single().confirmed)
     }
 
+    @Test fun emptySimklAnimeBucketMeansNotRated() = runTest {
+        val service = service()
+        coEvery { simkl.execute(any(), any()) } coAnswers {
+            val request = firstArg<SimklApiRequest>()
+            SimklApiResponse(200, if ("/anime/" in request.path) "null" else "{\"shows\":[]}", emptyMap())
+        }
+        val result = service.read(target.copy(movie = false), session.copy(providers = setOf(PersonalRatingProvider.SIMKL))).single()
+        assertTrue(result.confirmed)
+        assertNull(result.rating)
+    }
+
+    @Test fun simklStopsOnceTheVerifiedTitleIsFound() = runTest {
+        val service = service()
+        coEvery { simkl.execute(any(), any()) } returns SimklApiResponse(200,
+            """{"shows":[{"user_rating":9,"show":{"ids":{"imdb":"tt1234567"}}}]}""", emptyMap())
+        val result = service.read(target.copy(movie = false), session.copy(providers = setOf(PersonalRatingProvider.SIMKL))).single()
+        assertTrue(result.confirmed)
+        assertEquals(9, result.rating)
+        coVerify(exactly = 1) { simkl.execute(any(), any()) }
+    }
+
+    @Test fun simklEmptyBucketsDoNotTurnErrorEnvelopesIntoAbsentRatings() {
+        assertEquals(0, simklRatingRows("null", "anime").length())
+        assertEquals(0, simklRatingRows("{}", "shows").length())
+        assertEquals(0, simklRatingRows("{\"anime\":null}", "anime").length())
+        try { simklRatingRows("{\"error\":\"fixture\"}", "shows"); fail("Expected API failure") }
+        catch (_: IllegalStateException) { }
+    }
+
     @Test fun payloadUsesWholeTitleAndTenPointScale() {
         for (provider in PersonalRatingProvider.entries) {
             val body = ratingBody(target, provider, 9)

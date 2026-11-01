@@ -1,6 +1,9 @@
 package com.nuvio.tv.ui.screens.detail
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.tv.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -98,28 +101,32 @@ private fun PersonalRatingDialog(title: String, state: PersonalRatingsState, eli
         LaunchedEffect(state.results, state.saved) {
             if (!state.saved) selected = state.results.filter { it.confirmed }.mapNotNull { it.rating }.distinct().singleOrNull()
         }
-        NuvioDialog(onDismiss = onClose, title = "Your rating", subtitle = title, width = 620.dp) {
-            Text("Half-star steps · 1–10 on Trakt, Simkl and MDBList")
-            if (state.busy) Text("Contacting trackers…")
-            state.error?.let { Text(it) }
-            state.results.forEach { result ->
-                Text(result.provider.label + ": " + when {
-                    !result.confirmed -> if (state.saved) "Not saved — retry" else "Could not load existing rating"
-                    result.rating == null -> if (state.saved) "Rating removed" else "Not rated"
-                    else -> "${result.rating / 2.0} ★ (${result.rating}/10)" + if (state.saved) " — saved" else ""
-                })
-            }
-            for (start in listOf(1, 6)) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (rating in start until start + 5) Button(enabled = !state.busy, onClick = { selected = rating }) {
-                    Text((if (selected == rating) "✓ " else "") + "${rating / 2.0} ★")
+        NuvioDialog(onDismiss = onClose, title = "Your rating", subtitle = title, width = 620.dp,
+            usePlatformDefaultWidth = false, contentPadding = 16.dp, contentSpacing = 8.dp) {
+            Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Half-star steps · 1–10 on your trackers", style = MaterialTheme.typography.bodyMedium)
+                if (state.busy) Text("Contacting trackers…")
+                state.error?.let { Text(it) }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { state.results.forEach { result ->
+                    Text(result.provider.label + ": " + when {
+                        !result.confirmed -> if (state.saved) "Not saved — retry" else "Could not load existing rating"
+                        result.rating == null -> if (state.saved) "Rating removed" else "Not rated"
+                        else -> "${result.rating / 2.0} ★ (${result.rating}/10)" + if (state.saved) " — saved" else ""
+                    }, style = MaterialTheme.typography.bodyMedium)
+                } }
+                for (start in listOf(1, 6)) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (rating in start until start + 5) Button(modifier = Modifier.weight(1f).height(40.dp), enabled = !state.busy, onClick = { selected = rating }) {
+                        Text((if (selected == rating) "✓ " else "") + "${rating / 2.0} ★", maxLines = 1, softWrap = false)
+                    }
                 }
-            }
-            Text("Submit to: " + eligible.joinToString { it.label })
-            if (PersonalRatingProvider.SIMKL in eligible) Text("Simkl may also add newly rated titles to your watchlist.")
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(enabled = !state.busy && state.results.isNotEmpty() && selected != null, onClick = { onWrite(selected) }) { Text("Submit") }
-                Button(enabled = !state.busy && state.results.isNotEmpty(), onClick = { onWrite(null) }) { Text("Remove ratings") }
-                Button(onClick = onClose) { Text("Close") }
+                Text("Submit to: " + eligible.joinToString { it.label }, style = MaterialTheme.typography.bodyMedium)
+                if (PersonalRatingProvider.SIMKL in eligible) Text("Simkl may also add newly rated titles to your watchlist.", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(modifier = Modifier.height(40.dp), enabled = !state.busy && state.results.isNotEmpty() && selected != null, onClick = { onWrite(selected) }) { Text("Submit") }
+                    Button(modifier = Modifier.height(40.dp), enabled = !state.busy && state.results.isNotEmpty(), onClick = { onWrite(null) }) { Text("Remove ratings") }
+                    Button(modifier = Modifier.height(40.dp), onClick = onClose) { Text("Close") }
+                }
             }
         }
     }

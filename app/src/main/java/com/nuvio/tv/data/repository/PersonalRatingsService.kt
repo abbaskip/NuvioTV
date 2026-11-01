@@ -134,18 +134,13 @@ internal class PersonalRatingsService @Inject constructor(
                 }
                 PersonalRatingProvider.SIMKL -> {
                     val types = if (target.movie) listOf("movies") else if (target.anime) listOf("anime") else listOf("shows", "anime")
-                    val out = JSONArray()
                     for (type in types) {
                         val response = simkl.execute(SimklApiRequest(SimklHttpMethod.GET,
                             "/sync/ratings/$type/1,2,3,4,5,6,7,8,9,10"), session.simkl)
-                        val body = org.json.JSONTokener(response.body).nextValue()
-                        val list = if (body is JSONArray) body else {
-                            check(!hasRatingErrors(body as JSONObject)) { "Rating lookup failed" }
-                            requireNotNull(body.optJSONArray(type)) { "Invalid ratings response" }
-                        }
-                        for (i in 0 until list.length()) out.put(list.getJSONObject(i))
+                        checkAccount(provider, session)
+                        findRatingRow(target, simklRatingRows(response.body, type))?.let { return ratingValue(it) }
                     }
-                    out
+                    JSONArray()
                 }
                 PersonalRatingProvider.MDBLIST -> {
                     val response = mdblist.get("/sync/ratings", mapOf("offset" to "$offset", "limit" to "1000"), requireNotNull(session.mdblist))
@@ -160,14 +155,7 @@ internal class PersonalRatingsService @Inject constructor(
                 }
             }
             checkAccount(provider, session)
-            for (i in 0 until rows.length()) {
-                val row = rows.getJSONObject(i)
-                check(!hasRatingErrors(row)) { "Invalid rating record" }
-                val media = row.optJSONObject(if (target.movie) "movie" else "show") ?: row.optJSONObject("anime") ?: continue
-                if (ratingIdsMatch(target.ids, media.optJSONObject("ids"))) {
-                    return (if (row.has("user_rating")) row.optInt("user_rating") else row.optInt("rating")).takeIf { it in 1..10 }
-                }
-            }
+            findRatingRow(target, rows)?.let { return ratingValue(it) }
             page++
             offset += 1000
         } while (more)
@@ -213,3 +201,31 @@ internal fun hasRatingErrors(value: JSONObject): Boolean {
     }
     return nonempty(value.opt("errors")) || nonempty(value.opt("not_found")) || nonempty(value.opt("error"))
 }
+
+/** Simkl returns JSON null for an empty rating bucket, rather than an empty array. */
+internal fun simklRatingRows(payload: String, type: String): JSONArray {
+    val body = org.json.JSONTokener(payload).nextValue()
+    return when {
+        body == JSONObject.NULL -> JSONArray()
+        body is JSONArray -> body
+        body is JSONObject -> {
+            check(!hasRatingErrors(body)) { "Rating lookup failed" }
+            if (body.length() == 0 || body.has(type) && body.isNull(type)) JSONArray()
+            else requireNotNull(body.optJSONArray(type)) { "Invalid ratings response" }
+        }
+        else -> error("Invalid ratings response")
+    }
+}
+
+private fun findRatingRow(target: PersonalRatingTarget, rows: JSONArray): JSONObject? {
+    for (i in 0 until rows.length()) {
+        val row = rows.getJSONObject(i)
+        check(!hasRatingErrors(row)) { "Invalid rating record" }
+        val media = row.optJSONObject(if (target.movie) "movie" else "show") ?: row.optJSONObject("anime") ?: continue
+        if (ratingIdsMatch(target.ids, media.optJSONObject("ids"))) return row
+    }
+    return null
+}
+
+private fun ratingValue(row: JSONObject): Int? =
+    (if (row.has("user_rating")) row.optInt("user_rating") else row.optInt("rating")).takeIf { it in 1..10 }
