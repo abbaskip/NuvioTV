@@ -723,24 +723,15 @@ fun LiveTvGuideScreen(
     val headerChannel = if (browsingGroups && playingChannel != null) playingChannel else focusedChannel
     val headerBlock = if (browsingGroups && playingChannel != null) blockAt(playingChannel, now) else focusedBlock
     val headerProgramKey = headerChannel?.key to headerBlock?.program?.startMs
-    val headerPoster by androidx.compose.runtime.produceState<String?>(initialValue = null, headerProgramKey) {
+    val headerPoster by androidx.compose.runtime.produceState<String?>(initialValue = null, headerProgramKey, settings.showPosters) {
         value = null
         if (!settings.showProgramDetails) return@produceState
-        // 24/7 channels with no real listings (no guide, or one long block named after the
-        // channel): the show's poster, by the channel's name.
-        val ch = headerChannel
-        if (ch != null && com.nuvio.tv.livetv.data.LiveTvPosterResolver.isChannelFiller(ch, headerBlock?.program)) {
-            delay(250)
-            value = viewModel.channelPoster(ch, headerBlock?.program)
-            return@produceState
-        }
+        if (!settings.showPosters) return@produceState
         val p = headerBlock?.program ?: return@produceState
-        // The guide's own image for the show (if it has one) straight away; your addon's
-        // poster replaces it when found.
-        if (LiveTvRepository.isPlaceholderTitle(p.title)) return@produceState // channel logo
         value = p.icon
-        delay(250) // don't look up every show while scrolling quickly
-        viewModel.posterFor(p.title, p, headerChannel)?.let { value = it }
+        delay(250) // Avoid repeated local detail reads during rapid navigation.
+        value = viewModel.posterFor(p, headerChannel)
+
     }
 
     fun ensureRowVisible(target: Int) {
@@ -905,7 +896,6 @@ fun LiveTvGuideScreen(
     FrameMeter("Guide")
     androidx.compose.runtime.CompositionLocalProvider(
         LocalShowDetails provides { key, p -> viewModel.details(key, p) },
-        LocalChannelAbout provides { ch, title -> viewModel.channelAbout(ch, title) }
     ) {
     Box(
         modifier = Modifier
@@ -2223,14 +2213,6 @@ private fun GuideHeader(
                     }
                 }
                 Spacer(Modifier.height(if (small) 4.dp else 6.dp))
-                // 24/7 channels (no episode info): what the channel plays, from your addons.
-                val about = rememberChannelAbout(channel, p)
-                if (GuideInfoPart.DESCRIPTION !in hid && about != null) {
-                    aboutLine(about).takeIf { it.isNotBlank() }?.let {
-                        LiveText(it, color = NuvioTheme.colors.TextSecondary, size = if (small) 13.sp else 14.sp)
-                        Spacer(Modifier.height(if (small) 2.dp else 4.dp))
-                    }
-                }
                 // As many lines as fit in the space left (it was one line on the small panel and
                 // two on the standard one, however much room there was).
                 if (GuideInfoPart.DESCRIPTION in hid) Spacer(Modifier.weight(1f))
@@ -2239,8 +2221,7 @@ private fun GuideHeader(
                     val lineHeight = with(androidx.compose.ui.platform.LocalDensity.current) { textSize.toDp() } * 1.45f
                     val lines = (maxHeight / lineHeight).toInt().coerceIn(1, 8)
                     ScrollingDescription(
-                        text = about?.description?.takeIf { it.isNotBlank() }
-                            ?: p?.description ?: if (p == null) "No program information" else "",
+                        text = p?.description ?: if (p == null) "No program information" else "",
                         color = NuvioTheme.colors.TextSecondary,
                         size = textSize,
                         maxLines = lines

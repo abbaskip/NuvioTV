@@ -79,9 +79,6 @@ data class RecordingArt(val backdrop: String?, val logo: String?)
 class RecordingsViewModel @Inject constructor(
     val recorder: LiveTvRecorder,
     val scheduler: LiveTvRecordingScheduler,
-    private val posterResolver: com.nuvio.tv.livetv.data.LiveTvPosterResolver,
-    private val tmdbService: com.nuvio.tv.core.tmdb.TmdbService,
-    private val tmdbMetadataService: com.nuvio.tv.core.tmdb.TmdbMetadataService,
     private val liveRepository: com.nuvio.tv.livetv.data.LiveTvRepository,
     private val livePrefs: com.nuvio.tv.livetv.data.LiveTvPreferences
 ) : ViewModel() {
@@ -124,27 +121,9 @@ class RecordingsViewModel @Inject constructor(
         }
     }
 
-    private val _posters = MutableStateFlow<Map<String, String>>(emptyMap())
-    /** Recording id -> poster, looked up by title the same way the guide does. */
-    val posters: StateFlow<Map<String, String>> = _posters.asStateFlow()
-    private val tried = HashSet<String>()
-
-    fun loadPosters(list: List<LiveTvRecording>) {
-        val todo = list.filter { tried.add(it.id) }
-        if (todo.isEmpty()) return
-        viewModelScope.launch {
-            for (r in todo) {
-                // Sports recordings: the channel's logo (game titles found random films).
-                if (com.nuvio.tv.livetv.data.LiveTvPosterResolver.isSportsRecording(r.channelName, r.title)) continue
-                val poster = runCatching { posterResolver.posterFor(r.title, null, com.nuvio.tv.livetv.data.LiveTvPosterResolver.Clues(), urgent = false) }.getOrNull()
-                if (poster != null) _posters.value = _posters.value + (r.id to poster)
-            }
-        }
-    }
-
     // ---- Artwork: the show's backdrop with its logo over it, like Nuvio's landscape cards.
     private val _art = MutableStateFlow<Map<String, RecordingArt>>(emptyMap())
-    /** Recording id -> backdrop and logo (from TMDB, else your addons). */
+    /** Previously saved artwork only; opening recordings never searches metadata services. */
     val art: StateFlow<Map<String, RecordingArt>> = _art.asStateFlow()
     private val triedArt = HashSet<String>()
     private val artPrefs = recorder.appContext.getSharedPreferences("livetv_recording_art", android.content.Context.MODE_PRIVATE)
@@ -161,34 +140,6 @@ class RecordingsViewModel @Inject constructor(
             }
         }
         if (saved.isNotEmpty()) _art.value = _art.value + saved
-        viewModelScope.launch {
-            for (r in todo) {
-                if (r.id in saved) continue
-                // Sports: no guessed artwork (the card shows the channel's logo).
-                if (com.nuvio.tv.livetv.data.LiveTvPosterResolver.isSportsRecording(r.channelName, r.title)) continue
-                val found = runCatching { findArt(r.title) }.getOrNull() ?: continue
-                _art.value = _art.value + (r.id to found)
-                runCatching { artPrefs.edit().putString(r.id, (found.backdrop ?: "") + "\n" + (found.logo ?: "")).apply() }
-            }
-        }
-    }
-
-    /** The show in your addons' catalogs, then its TMDB backdrop and logo (the addon's own if TMDB has none). */
-    private suspend fun findArt(title: String): RecordingArt? {
-        val hit = posterResolver.titleFor(title) ?: return null
-        val movie = hit.type.equals("movie", ignoreCase = true)
-        val tmdb = runCatching {
-            tmdbService.ensureTmdbId(hit.meta.id, if (movie) "movie" else "series")?.let { id ->
-                tmdbMetadataService.fetchEnrichment(
-                    tmdbId = id,
-                    contentType = if (movie) com.nuvio.tv.domain.model.ContentType.MOVIE else com.nuvio.tv.domain.model.ContentType.SERIES
-                )
-            }
-        }.getOrNull()
-        val backdrop = tmdb?.backdrop ?: hit.meta.background ?: hit.meta.landscapePoster
-        val logo = tmdb?.logo ?: hit.meta.logo
-        if (backdrop == null) return null
-        return RecordingArt(backdrop, logo)
     }
 
     fun playUrl(rec: LiveTvRecording): String = recorder.playUrl(rec)
@@ -216,7 +167,7 @@ fun RecordingsScreen(
     val recordings by viewModel.recordings.collectAsStateWithLifecycle()
     val schedules by viewModel.schedules.collectAsStateWithLifecycle()
     val seriesRules by viewModel.series.collectAsStateWithLifecycle()
-    val posters by viewModel.posters.collectAsStateWithLifecycle()
+    val posters = remember(recordings) { recordings.mapNotNull { r -> r.channelLogo?.let { r.id to it } }.toMap() }
     val art by viewModel.art.collectAsStateWithLifecycle()
     var scheduleMenu by remember { mutableStateOf<RecordingSchedule?>(null) }
     // Back from the player: read where you got to again (the progress bars).
@@ -234,7 +185,7 @@ fun RecordingsScreen(
     }
     var seriesMenu by remember { mutableStateOf<SeriesRule?>(null) }
     var seriesKeepMenu by remember { mutableStateOf<SeriesRule?>(null) }
-    LaunchedEffect(recordings) { viewModel.loadPosters(recordings); viewModel.loadArt(recordings) }
+    LaunchedEffect(recordings) { viewModel.loadArt(recordings) }
     var menuFor by remember { mutableStateOf<LiveTvRecording?>(null) }
     var confirmDelete by remember { mutableStateOf<LiveTvRecording?>(null) }
     var infoFor by remember { mutableStateOf<LiveTvRecording?>(null) }

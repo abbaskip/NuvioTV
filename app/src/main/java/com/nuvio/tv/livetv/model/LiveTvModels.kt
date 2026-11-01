@@ -325,7 +325,7 @@ data class LiveTvSettings(
     val searchOrder: String = "live,ondemand,catalog",
     /** OK on a channel in search plays it behind the results first (OK again: full screen). */
     val searchPreview: Boolean = true,
-    /** On Demand posters from your own addons (off = the provider's images only). */
+    /** Legacy backup preference; standalone On Demand always uses provider artwork. */
     val onDemandAddonPosters: Boolean = true,
     /** Several playlists: list each playlist's groups under a foldable heading. */
     val groupPlaylistHeadings: Boolean = true,
@@ -341,7 +341,7 @@ data class LiveTvSettings(
     val showNowLine: Boolean = true,
     /** Send Dolby / DTS audio untouched to the TV or speaker (off: the app decodes it). */
     val audioPassthrough: Boolean = true,
-    /** Show posters for what's on; off: just the channel logo (no poster lookups at all). */
+    /** Show provider EPG artwork when present; off uses the channel logo. */
     val showPosters: Boolean = true,
     /** On Demand: show each title once, even when the provider lists several copies. */
     val vodMergeDuplicates: Boolean = true,

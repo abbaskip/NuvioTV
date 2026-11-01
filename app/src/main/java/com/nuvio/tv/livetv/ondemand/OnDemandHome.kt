@@ -35,32 +35,20 @@ object VodHomeIds {
     fun metaId(uid: String) = PREFIX + uid
     fun uidOf(metaId: String): String? = metaId.takeIf { it.startsWith(PREFIX) }?.removePrefix(PREFIX)
 
-    /** A card for a provider title: the matched addon details when found (poster, backdrop,
-     *  logo, description, rating), otherwise the provider's own name and picture. */
-    fun toMeta(item: VodItem, matched: MetaPreview?, poster: String?, name: String): MetaPreview {
-        val type = if (item.kind == VodKind.SERIES) ContentType.SERIES else ContentType.MOVIE
-        return matched?.copy(
-            id = metaId(item.uid),
-            type = type,
-            rawType = if (item.kind == VodKind.SERIES) "series" else "movie",
-            poster = poster ?: matched.poster ?: item.icon,
-            // Always a poster-shaped card: some addons label their artwork "landscape", and a
-            // tall poster in a wide card got its top and bottom (often the faces) cropped off.
-            posterShape = PosterShape.POSTER
-        ) ?: MetaPreview(
-            id = metaId(item.uid),
-            type = type,
-            name = name,
-            poster = poster ?: item.icon,
-            posterShape = PosterShape.POSTER,
-            background = null,
-            logo = null,
-            description = null,
-            releaseInfo = item.year?.toString(),
-            imdbRating = null,
-            genres = item.genre?.split(',')?.map { it.trim() }?.filter { it.isNotBlank() }.orEmpty()
-        )
-    }
+    /** Provider artwork and labels, independent of addon metadata and old enrichment caches. */
+    fun toMeta(item: VodItem): MetaPreview = MetaPreview(
+        id = metaId(item.uid),
+        type = if (item.kind == VodKind.SERIES) ContentType.SERIES else ContentType.MOVIE,
+        name = OnDemandDatabase.displayTitle(item.name),
+        poster = item.icon,
+        posterShape = PosterShape.POSTER,
+        background = null,
+        logo = null,
+        description = null,
+        releaseInfo = item.year?.toString(),
+        imdbRating = item.rating?.toFloatOrNull(),
+        genres = item.genre?.split(',')?.map { it.trim() }?.filter { it.isNotBlank() }.orEmpty()
+    )
 
     fun row(uid: String, name: String, kind: VodKind, items: List<MetaPreview>, hasMore: Boolean, page: Int) = CatalogRow(
         addonId = ADDON_ID,

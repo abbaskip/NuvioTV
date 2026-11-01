@@ -284,18 +284,14 @@ fun LiveTvPlayerScreen(
         viewModel.zap(playback.channelKey, direction)?.let { viewModel.preview(it) }
     }
 
-    // What's on now, and the poster Nuvio's catalogs would show for it (looked up ahead of time,
-    // so it's ready when the info bar opens).
+    // What is on now, with artwork supplied by the EPG.
     val nowProgram = rememberShowDetails(current?.key, current?.let { ch -> programs[ch.key]?.firstOrNull { now >= it.startMs && now < it.stopMs } })
     val watchingTitle = playback.catchupTitle ?: nowProgram?.title
     val poster by androidx.compose.runtime.produceState<String?>(initialValue = null, watchingTitle, current?.key) {
         value = null
         // In archive playback the guide entry isn't the live one, so no movie/series hint.
         val hintProgram = if (playback.catchupTitle == null) nowProgram else null
-        value = watchingTitle?.let { viewModel.posterFor(it, hintProgram, current) }
-            // A 24/7 channel with no guide: the show's poster, by the channel's name.
-            ?: current?.takeIf { playback.catchupTitle == null }?.let { viewModel.channelPoster(it, hintProgram) }
-            ?: hintProgram?.takeIf { !LiveTvRepository.isPlaceholderTitle(it.title) }?.icon
+        value = viewModel.posterFor(hintProgram, current)
     }
 
     BackHandler(enabled = listVisible) { listVisible = false }
@@ -652,9 +648,7 @@ fun LiveTvPlayerScreen(
         val browsePoster by androidx.compose.runtime.produceState<String?>(initialValue = null, settledBrowseKey, browseProgram?.title) {
             value = null
             val c = browseChannel?.takeIf { settledBrowseKey == it.key } ?: return@produceState
-            value = browseProgram?.title?.let { viewModel.posterFor(it, browseProgram, c) }
-                ?: viewModel.channelPoster(c, browseProgram)
-                ?: browseProgram?.takeIf { !LiveTvRepository.isPlaceholderTitle(it.title) }?.icon
+            value = viewModel.posterFor(browseProgram, c)
         }
         if (browseChannel != null && bannerVisible) {
             // What's actually playing, top right.
@@ -757,7 +751,6 @@ fun LiveTvPlayerScreen(
                     else -> PanelMode.LIVE
                 }
                 // 24/7 channels with no episode info: what the channel plays, from your addons.
-                val about = if (!archive) rememberChannelAbout(ch, nowProgram) else null
                 val showProgram = if (archive) cs?.program else nowProgram
                 // Ticks while visible, so the timeline moves.
                 var tick by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -832,10 +825,8 @@ fun LiveTvPlayerScreen(
                 val nextUp = if (mode == PanelMode.LIVE) {
                     viewModel.nextProgram(ch.key, nowProgram?.stopMs ?: tick)
                 } else null
-                val rawDesc = about?.description?.takeIf { it.isNotBlank() } ?: showProgram?.description
-                val descParts = remember(rawDesc, showProgram?.year, about != null) {
-                    // A 24/7 channel's show already has its years in the line (from aboutLine).
-                    splitDescriptionYear(rawDesc, showProgram?.year).let { if (about != null) it.copy(year = null) else it }
+                val descParts = remember(showProgram?.description, showProgram?.year) {
+                    splitDescriptionYear(showProgram?.description, showProgram?.year)
                 }
                 LiveTvPlayerPanel(
                     background = settings.panelBackground,
@@ -847,8 +838,7 @@ fun LiveTvPlayerScreen(
                     meta = metaWithYear(
                         listOf(
                             showProgram?.episode?.takeIf { settings.showEpisodeNumbers },
-                            showProgram?.category,
-                            about?.let { aboutLine(it) }
+                            showProgram?.category
                         ),
                         descParts.year
                     ),

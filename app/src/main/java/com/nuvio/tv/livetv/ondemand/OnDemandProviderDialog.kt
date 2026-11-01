@@ -88,7 +88,7 @@ internal fun ProviderDetailDialog(
 ) {
     val scope = rememberCoroutineScope()
     val info by produceState<VodInfo?>(initialValue = null, item.uid) { value = viewModel.info(item) }
-    val poster by produceState<String?>(initialValue = item.icon, item.uid) { viewModel.posterFor(item)?.let { value = it } }
+    val poster = item.icon
     var season by remember { mutableStateOf<Int?>(null) }
     val first = remember { FocusRequester() }
     LiveDialog(onDismiss = onDismiss, width = 760.dp) {

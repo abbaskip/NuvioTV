@@ -35,7 +35,7 @@ Metadata provided by [TheTVDB](https://thetvdb.com). Please consider contributin
 
 ## IPTV and Sports Hub
 
-**Live TV** opens a TV guide with channel groups, playlist selection, favourites, ordering preferences, search and full-screen playback. Configure your own **Xtream Codes** account or an **M3U playlist with XMLTV guide** in Live TV settings. Supported provider on-demand content is available from **On Demand**. ReSeq supplies no playlists, subscriptions or media.
+**Live TV** opens a TV guide with channel groups, playlist selection, favourites, ordering preferences, search and full-screen playback. Configure your own **Xtream Codes** account or an **M3U playlist with XMLTV guide** in Live TV settings. Supported provider on-demand content is available from **On Demand**. ReSeq supplies no playlists, subscriptions or media. The guide and standalone On Demand browser use provider metadata and artwork, without automatic title searches against metadata addons. Catalogue caching and identity-aware IPTV stream matching from normal movie and series pages remain available.
 
 **Sports Hub** brings together fixtures, supported results/live scores and channels from your playlists. Choose sports and optionally exclude categories or competitions; synonyms work in the background. Rugby League and Rugby Union are separate. Matching considers guide titles/descriptions, participants, broadcasters and channel names while retaining regional, provider and quality alternatives. Catch-up depends on your provider.
 
@@ -47,7 +47,7 @@ Optional Gemini assistance uses **your own key**, entered in Settings. It is not
 
 ## Configuration backup and personal ratings
 
-The development build adds **Google Drive backup and sync** in **Settings → Backup & Sync** on the primary profile. Connect Google Drive on each TV using the on-screen code. Manual backup/restore and debounced automatic sync carry playlists and connection settings, guide mappings, channel customisations, Sports Hub preferences and each profile's mixed addon/playlist source ordering, disabled playlist sources, non-default TVDB order IDs and per-series Shuffle choices (enabled/off and All episodes/Unwatched episodes). The global Shuffle availability switch continues using Nuvio's existing settings/cloud sync. Temporarily unavailable orders are retained. Use matching Nuvio profile IDs and names on both devices; restore stops rather than assigning one person's choices to another profile.
+**Google Drive backup and sync** is available in **Settings → Backup & Sync** on the primary profile. Connect Google Drive on each TV using the on-screen code. Manual backup/restore and debounced automatic sync carry playlists and connection settings, guide mappings, channel customisations, Sports Hub preferences and each profile's mixed addon/playlist source ordering, disabled playlist sources, non-default TVDB order IDs and per-series Shuffle choices (enabled/off and All episodes/Unwatched episodes). The global Shuffle availability switch continues using Nuvio's existing settings/cloud sync. Temporarily unavailable orders are retained. Use matching Nuvio profile IDs and names on both devices; restore stops rather than assigning one person's choices to another profile.
 
 The backup includes private playlist credentials. ReSeq never shares it; don't share the file yourself. Personal TVDB/Gemini keys, tracker sessions, learned episode mappings and playback caches are not copied. Conflicting changes stop sync and are reported rather than silently overwriting settings. Automatic checks run while ReSeq is open, not as an always-running background service. Explicit Restore uses the saved configuration, so review the confirmation first.
 
@@ -55,7 +55,7 @@ The backup includes private playlist credentials. ReSeq never shares it; don't s
 
 An optional **Prompt to rate after watching** setting is off by default. It prompts after returning from a movie that reached playback completion, not after episodes or early stops. Rating controls require a supported title identity and a compatible connected tracker.
 
-## IPTV sources in this development build
+## IPTV playback sources and Stalker portals
 
 Xtream playlists with movies and series enabled appear **individually in Addons**, alongside your existing addons. Move each playlist up or down independently; its switch controls stream-list availability without removing the playlist, guide or On Demand browser. Autoplay has separate Addons, Plugins and IPTV Playlists switches under **Settings → Playback**. IPTV autoplay starts off.
 
@@ -92,7 +92,7 @@ Use Android Studio, JDK 21 and the Android SDK. Copy `local.example.properties` 
 
 Debug builds have a separate package ID. Signed releases require a private keystore and the `NUVIO_RELEASE_STORE_FILE`, `NUVIO_RELEASE_KEY_ALIAS`, `NUVIO_RELEASE_STORE_PASSWORD` and `NUVIO_RELEASE_KEY_PASSWORD` environment variables (or ignored local properties). Public ReSeq APKs use a permanent release certificate. Build configuration embedded in an APK is extractable; never supply personal account tokens or confidential backend credentials.
 
-For optional Google Drive support, enable the Drive API and create a **TVs and Limited Input devices** OAuth client. Supply `GOOGLE_DRIVE_CLIENT_ID` and `GOOGLE_DRIVE_CLIENT_SECRET` through ignored local properties or environment variables. This device flow does not use an Android package/signature OAuth registration. External projects in Testing must list authorised test users and may require reconnection after Google's testing token expiry. See [Google's device-flow documentation](https://developers.google.com/identity/protocols/oauth2/limited-input-device). Keep downloaded client configuration outside Git; installed-app configuration is extractable from an APK.
+For optional Google Drive support, enable the Drive API and create a **TVs and Limited Input devices** OAuth client. Supply `GOOGLE_DRIVE_CLIENT_ID` and `GOOGLE_DRIVE_CLIENT_SECRET` through ignored local properties or environment variables. This device flow does not use an Android package/signature OAuth registration. Users connect their own Google account; no individual API registration is required. ReSeq uses the limited `drive.file` permission. Google branding verification is pending, so Google may display an unverified-app notice or apply access limits. See [Google's device-flow documentation](https://developers.google.com/identity/protocols/oauth2/limited-input-device). Keep downloaded client configuration outside Git; installed-app configuration is extractable from an APK.
 
 [Privacy and data handling](PRIVACY.md). Some service authorisation pages may identify the existing Nuvio integration.
 

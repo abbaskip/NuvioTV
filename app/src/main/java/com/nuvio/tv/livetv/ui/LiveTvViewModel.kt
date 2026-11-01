@@ -79,8 +79,6 @@ class LiveTvViewModel @Inject constructor(
     val playback: LiveTvPlaybackController,
     private val session: LiveTvSession,
     private val channelStore: com.nuvio.tv.livetv.data.LiveTvChannelStore,
-    private val posterResolver: com.nuvio.tv.livetv.data.LiveTvPosterResolver,
-    private val matcher247: com.nuvio.tv.livetv.data.LiveTv247Matcher,
     layoutPrefs: com.nuvio.tv.data.local.LayoutPreferenceDataStore,
     driveSync: com.nuvio.tv.livetv.sync.LiveTvDriveSync,
     val recorder: com.nuvio.tv.livetv.record.LiveTvRecorder,
@@ -918,30 +916,6 @@ class LiveTvViewModel @Inject constructor(
         }
     }
 
-    init {
-        // Posters for what's on now in the group on screen, fetched quietly one at a time in the
-        // background, so they're already there as you move through the guide.
-        viewModelScope.launch {
-            uiState.map { it.channels.take(40) }.distinctUntilChanged().collectLatest { channels ->
-                delay(2_000)
-                if (!settings.value.showPosters) return@collectLatest
-                for (ch in channels) {
-                    // Never while the video is full screen: that's when it needs the box most.
-                    LiveTvFullscreen.active.first { !it }
-                    com.nuvio.tv.livetv.data.BackgroundWork.awaitIdle()
-                    val nowMs = System.currentTimeMillis()
-                    val p = programs.value[ch.key]?.firstOrNull { nowMs >= it.startMs && nowMs < it.stopMs }
-                    if (com.nuvio.tv.livetv.data.LiveTvPosterResolver.isChannelFiller(ch, p)) {
-                        runCatching { channelPoster(ch, p, urgent = false) }
-                        continue
-                    }
-                    if (p == null || com.nuvio.tv.livetv.data.LiveTvRepository.isPlaceholderTitle(p.title)) continue
-                    runCatching { posterFor(p.title, p, ch, urgent = false) }
-                }
-            }
-        }
-    }
-
     /** Guide scrolled ahead or back: load those hours from the guide database if needed. */
     fun ensureGuideRange(fromMs: Long, toMs: Long) = repository.ensureRange(fromMs, toMs)
     /** The group on screen: its listings for every day the guide keeps (see the repository). */
@@ -1035,33 +1009,11 @@ class LiveTvViewModel @Inject constructor(
         notePendingEpg(channel.key, next)
     }
 
-    /** The poster Nuvio's catalogs would show for this program, or null if there's no good match. */
-    suspend fun posterFor(
-        programTitle: String,
-        program: EpgProgram? = null,
-        channel: LiveChannel? = null,
-        /** The show on screen (fast lane); false for fetching ahead of time (slow lane). */
-        urgent: Boolean = true
-    ): String? = if (!settings.value.showPosters) null // "Show posters" off: logo only, no lookups
-    // Sports: the channel's logo (game titles found random films and shows).
-    else if (com.nuvio.tv.livetv.data.LiveTvPosterResolver.isSports(channel, program)) null
-    else if (channel != null && com.nuvio.tv.livetv.data.LiveTvPosterResolver.isChannelFiller(channel, program)) {
-        // A 24/7 channel whose "listing" is just the channel ("24/7 South Park" all day, or no
-        // guide at all): the show's poster, by the channel's name.
-        channelPoster(channel, program, urgent)
-    } else {
-        // Details (year, cast, description) sharpen the match; fetch them if not loaded yet.
+    /** Read provider artwork from the local EPG; never search addon catalogues on focus. */
+    suspend fun posterFor(program: EpgProgram?, channel: LiveChannel? = null): String? {
+        if (!settings.value.showPosters) return null
         val full = if (program != null && channel != null) details(channel.key, program) else program
-        posterResolver.posterFor(
-            programTitle,
-            com.nuvio.tv.livetv.data.LiveTvPosterResolver.typeHint(full, channel),
-            com.nuvio.tv.livetv.data.LiveTvPosterResolver.Clues(
-                year = full?.year,
-                people = full?.people.orEmpty(),
-                description = full?.description
-            ),
-            urgent = urgent
-        ) ?: channel?.let { channelPoster(it, urgent = urgent) } // 24/7 channel, episode not found: the show's poster
+        return full?.icon?.takeIf { it.isNotBlank() }
     }
 
     // ------------------------------------------------------------ show details on demand
@@ -1089,56 +1041,6 @@ class LiveTvViewModel @Inject constructor(
         )
         detailCache[key] = merged
         return merged
-    }
-
-    // ------------------------------------------------------------ 24/7 channels
-
-    /**
-     * For 24/7 channels (one show, or one star's films, all day, usually with no guide): what
-     * the channel plays, from your addons, by the channel's name. "24/7 Seinfeld" -> Seinfeld's
-     * description. Only for channels marked 24/7 (in the name or group), never for others.
-     * If the channel's name finds nothing, the name of its one long listing is tried
-     * ("24/7 South Park" as the show's title), then the playlist's original channel name.
-     */
-    suspend fun channelAbout(channel: LiveChannel, programTitle: String? = null, urgent: Boolean = true): com.nuvio.tv.domain.model.MetaPreview? {
-        if (!com.nuvio.tv.livetv.data.LiveTvPosterResolver.is247(channel)) return null
-        val names = showNames247(channel, programTitle)
-        // TMDB first: it knows shows, film series, actors and films by name.
-        matcher247.match(channel, names)?.let { return it.toMeta() }
-        for (name in names) posterResolver.aboutTitle(name, urgent)?.let { return it }
-        return null
-    }
-
-    /** The names a 24/7 channel's show can be found by, best first ("24/7: Seinfeld" -> "Seinfeld"). */
-    private fun showNames247(channel: LiveChannel, programTitle: String?): List<String> =
-        listOfNotNull(channel.name, programTitle?.takeIf { !LiveTvRepository.isPlaceholderTitle(it) }, channel.tvgName)
-            .map { com.nuvio.tv.livetv.data.LiveTvPosterResolver.showNameOf(it) }
-            // "Netflix Drama", "Horror Movies": only a genre, so no show or film to look up.
-            .filter { it.length >= 2 && !com.nuvio.tv.livetv.data.LiveTvPosterResolver.isGenericName(it) }
-            .distinctBy { LiveTvRepository.normalize(it) }
-
-    /**
-     * A 24/7 channel's show poster, or null for other channels. The cleaned-up channel name goes
-     * through the same poster lookup as every other show in the guide (saved on the TV once
-     * found, the same limits on how much runs at once); the other names are only tried if that
-     * finds nothing.
-     */
-    suspend fun channelPoster(channel: LiveChannel, program: EpgProgram? = null, urgent: Boolean = true): String? {
-        if (!settings.value.showPosters) return null
-        if (com.nuvio.tv.livetv.data.LiveTvPosterResolver.isSports(channel, program)) return null
-        if (!com.nuvio.tv.livetv.data.LiveTvPosterResolver.is247(channel)) return null
-        // TMDB first (a show, a film series' collection cover, an actor's photo or a film);
-        // your addons' catalogs if TMDB has nothing by that name.
-        matcher247.match(channel, showNames247(channel, program?.title))?.let { return it.poster }
-        val hint = com.nuvio.tv.livetv.data.LiveTvPosterResolver.TypeHint(
-            com.nuvio.tv.livetv.data.LiveTvPosterResolver.Kind.SERIES,
-            strong = false,
-            weight = com.nuvio.tv.livetv.data.LiveTvPosterResolver.SHOW_247_WEIGHT
-        )
-        for (name in showNames247(channel, program?.title)) {
-            posterResolver.posterFor(name, hint, com.nuvio.tv.livetv.data.LiveTvPosterResolver.Clues(), urgent)?.let { return it }
-        }
-        return null
     }
 
     /** Remembers which channels to fill in first next time (the group on screen, favorites). */
@@ -1379,25 +1281,6 @@ class LiveTvViewModel @Inject constructor(
 
 /** How far past the end of a show a catch-up replay keeps going (into the next shows). */
 private const val CONTINUE_MS = 3L * 60 * 60 * 1000
-
-/** A TMDB 24/7 match as the show info the guide's panels already know how to show. */
-private fun com.nuvio.tv.livetv.data.LiveTv247Matcher.Match.toMeta() = com.nuvio.tv.domain.model.MetaPreview(
-    id = "tmdb247:" + kind + ":" + title,
-    type = when (kind) {
-        "series" -> com.nuvio.tv.domain.model.ContentType.SERIES
-        "movie", "collection" -> com.nuvio.tv.domain.model.ContentType.MOVIE
-        else -> com.nuvio.tv.domain.model.ContentType.UNKNOWN
-    },
-    name = title,
-    poster = poster,
-    posterShape = com.nuvio.tv.domain.model.PosterShape.POSTER,
-    background = backdrop,
-    logo = null,
-    description = overview,
-    releaseInfo = year,
-    imdbRating = rating,
-    genres = emptyList()
-)
 
 /** How long catch-up sticks to TS on a provider whose HLS replays failed, before trying HLS again. */
 private const val HLS_RETRY_MS = 7L * 24 * 3_600_000L

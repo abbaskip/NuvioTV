@@ -853,10 +853,8 @@ class LiveTvDriveSync @Inject constructor(
         val SOURCE_LISTS = setOf("playlists", "epg_sources")
         const val MODE_APPDATA = "appdata"
         const val MODE_FILE = "file"
-        /** Tried in order until Google accepts one. */
+        /** New connections use the supported device-flow permission; retain legacy mode for saved sessions. */
         val SCOPE_ATTEMPTS = listOf(
-            "openid email https://www.googleapis.com/auth/drive.appdata" to MODE_APPDATA,
-            "https://www.googleapis.com/auth/drive.appdata" to MODE_APPDATA,
             "https://www.googleapis.com/auth/drive.file" to MODE_FILE
         )
         const val FILE_NAME = "Nuvio ReSeq backup.json"

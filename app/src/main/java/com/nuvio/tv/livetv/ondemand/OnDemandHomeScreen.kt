@@ -92,10 +92,9 @@ fun OnDemandHomeScreen(
     LaunchedEffect(Unit) { viewModel.loadHome() }
 
     var showManage by remember { mutableStateOf(false) }
-    // The card last highlighted, for the Menu button's "Fix poster".
+    // The card last highlighted, for the group menu.
     var lastFocusedCard by remember { mutableStateOf<String?>(null) }
     var cardMenu by remember { mutableStateOf<VodItem?>(null) }
-    var fixFor by remember { mutableStateOf<VodItem?>(null) }
     var providerItem by remember { mutableStateOf<VodItem?>(null) }
     // "See all" on a row: that row in Nuvio's See all grid, over this page.
     var seeAllUid by remember { mutableStateOf<String?>(null) }
@@ -108,7 +107,6 @@ fun OnDemandHomeScreen(
     // Leaving this page (Back, the menu, opening a title): stop the trailer straight away, before
     // the switch animates. Tearing the trailer's player down mid-switch, while Home starts up its
     // own screen, made going back to Home lag.
-    var trailersActive by remember { mutableStateOf(true) }
     // On Demand's own trailer player. The app's shared one belongs to Home: sharing it meant the
     // same player was attached to both pages while going back, and Android closed the app.
     val ownPool = remember {
@@ -128,15 +126,12 @@ fun OnDemandHomeScreen(
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             when (event) {
                 androidx.lifecycle.Lifecycle.Event.ON_PAUSE, androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
-                    trailersActive = false
-                    viewModel.stopTrailers()
                     // Free the video hardware before Home needs it.
                     runCatching { ownPool.yield() }
                     OnDemandBackdropGuard.leave()
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
                     runCatching { ownPool.reclaim() }
-                    trailersActive = true
                 }
                 else -> Unit
             }
@@ -214,8 +209,8 @@ fun OnDemandHomeScreen(
         error = null,
         modernHomePresentation = modernPresentation,
         heroEnrichmentEnabled = false,
-        // No trailers while leaving the page (see trailersActive).
-        focusedPosterBackdropTrailerEnabled = base.focusedPosterBackdropTrailerEnabled && trailersActive,
+        // Standalone catalogue artwork comes only from the provider.
+        focusedPosterBackdropTrailerEnabled = false,
         catalogAddonNameEnabled = false,
         catalogTypeSuffixEnabled = false
     )
@@ -229,8 +224,7 @@ fun OnDemandHomeScreen(
         )
     }
 
-    // Opening a card: Nuvio's details page (Play there plays your provider's copy), or the
-    // provider's own details for titles your addons don't know.
+    // Open the provider's details without searching external metadata catalogues.
     val open: (String) -> Unit = { metaId ->
         val item = viewModel.homeItem(metaId)
         if (item != null && !opening) {
@@ -280,14 +274,10 @@ fun OnDemandHomeScreen(
     }
     val onCatalogLongPress: (MetaPreview, String) -> Unit = { card, _ -> longPress(card) }
 
-    // Trailers: On Demand's own (found with Nuvio's trailer service), following Nuvio's trailer
-    // settings through the layout, and never shared with Home.
-    val trailerUrls: Map<String, String> = if (trailersActive) viewModel.trailerUrls else emptyMap()
-    val trailerAudioUrls: Map<String, String> = if (trailersActive) viewModel.trailerAudioUrls else emptyMap()
-    val requestTrailerById: (String, String, String?, String) -> Unit = { itemId, _, _, _ ->
-        if (trailersActive) viewModel.requestTrailer(itemId)
-    }
-    val requestTrailerForItem: (MetaPreview) -> Unit = { item -> if (trailersActive) viewModel.requestTrailer(item.id) }
+    val trailerUrls = emptyMap<String, String>()
+    val trailerAudioUrls = emptyMap<String, String>()
+    val requestTrailerById: (String, String, String?, String) -> Unit = { _, _, _, _ -> }
+    val requestTrailerForItem: (MetaPreview) -> Unit = { }
 
     // Back opens the menu, like on every other menu page. Added here because otherwise Back
     // went to the page underneath (Home) on this one. The layouts' own Back handling (scroll a
@@ -306,7 +296,7 @@ fun OnDemandHomeScreen(
             .onPreviewKeyEvent { e ->
                 // Menu button: Manage VOD Groups, from anywhere on the page.
                 if (e.type == KeyEventType.KeyDown && e.key == Key.Menu) {
-                    // On a title: Fix poster or Manage VOD Groups. Elsewhere: Manage VOD Groups.
+                    // Manage the provider groups without looking up title metadata.
                     val item = lastFocusedCard?.let { viewModel.homeItem(it) }
                     if (item != null) cardMenu = item else showManage = true
                     true
@@ -325,7 +315,6 @@ fun OnDemandHomeScreen(
             }
             seeAllUid != null -> {
                 val seeAllRow = state.rows.firstOrNull { it.catalogId == seeAllUid }
-                LaunchedEffect(seeAllUid, seeAllRow?.items?.size) { seeAllUid?.let { viewModel.enrichSeeAll(it) } }
                 OnDemandSeeAll(
                     row = seeAllRow,
                     posterCardStyle = posterCardStyle,
@@ -333,7 +322,7 @@ fun OnDemandHomeScreen(
                     onOpen = { open(it) },
                     onFocus = onItemFocus,
                     onLoadMore = { seeAllUid?.let { viewModel.loadMoreHome(it) } },
-                    onBack = { viewModel.stopSeeAll(); seeAllUid = null },
+                    onBack = { seeAllUid = null },
                     // The group's own sort, else Default Sort Order.
                     sortLabel = seeAllUid?.let { uid ->
                         sortLabel(state.groups.firstOrNull { it.uid == uid }?.sort) ?: viewModel.defaultSortLabel()
@@ -477,25 +466,10 @@ fun OnDemandHomeScreen(
             com.nuvio.tv.livetv.ui.LiveText(OnDemandDatabase.displayTitle(item.name), size = 20.sp, weight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 2)
             androidx.compose.foundation.layout.Spacer(Modifier.height(14.dp))
             androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
-                com.nuvio.tv.livetv.ui.MenuItem("Fix poster", Modifier.focusRequester(first)) { cardMenu = null; fixFor = item }
-                com.nuvio.tv.livetv.ui.MenuItem("Manage VOD Groups") { cardMenu = null; showManage = true }
+                com.nuvio.tv.livetv.ui.MenuItem("Manage VOD Groups", Modifier.focusRequester(first)) { cardMenu = null; showManage = true }
             }
         }
         LaunchedEffect(Unit) { kotlinx.coroutines.delay(60); runCatching { first.requestFocus() } }
-    }
-    fixFor?.let { item ->
-        com.nuvio.tv.livetv.ui.TextInputDialog(
-            title = "Fix poster",
-            initial = OnDemandDatabase.displayTitle(item.name) + (item.year?.let { " ($it)" } ?: ""),
-            hint = "The movie or series name, and the year if you know it, like Dune (2021). Leave it empty to go back to automatic.",
-            confirmLabel = "Save",
-            onDismiss = { fixFor = null },
-            onConfirm = { text ->
-                fixFor = null
-                val (name, year) = splitFixYear(text)
-                viewModel.fixPoster(item, name, year)
-            }
-        )
     }
     if (showManage) {
         ManageVodGroupsPanel(

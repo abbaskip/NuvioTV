@@ -632,12 +632,6 @@ internal fun LiveTvSettingsContent(
                         s.vodMergeDuplicates,
                         { update { it.copy(vodMergeDuplicates = !it.vodMergeDuplicates) } }
                     )
-                    SettingsToggleRow(
-                        "Use Posters from My Addons",
-                        "Your addons' posters where they have the title. Off: the provider's images only.",
-                        s.onDemandAddonPosters,
-                        { update { it.copy(onDemandAddonPosters = !it.onDemandAddonPosters) } }
-                    )
                     SettingsActionRow(
                         "Show Hidden Categories", "Brings back every On Demand category you hid",
                         "${user.vodHiddenCategories.size}", onClick = {

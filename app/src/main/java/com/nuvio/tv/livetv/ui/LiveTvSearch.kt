@@ -161,18 +161,7 @@ private fun rememberLiveTvSearchResultsEnabled(
             viewModel.markFullscreenOpened()
             onOpened()
         },
-        posterFor = { hit ->
-            val p = hit.program?.takeIf { !LiveTvRepository.isPlaceholderTitle(it.title) }
-            when {
-                !viewModel.settings.value.showPosters -> null
-                // Sports: the channel's logo, never a guessed poster.
-                com.nuvio.tv.livetv.data.LiveTvPosterResolver.isSports(hit.channel, hit.program) -> null
-                p != null -> viewModel.posterFor(p.title, p, hit.channel) ?: p.icon
-                // A 24/7 channel (no listing, or only the channel's own name all day): the
-                // show's poster by the channel's name, as the guide shows it.
-                else -> viewModel.channelPoster(hit.channel, hit.program)
-            }
-        },
+        posterFor = { hit -> viewModel.posterFor(hit.program, hit.channel) },
         viewModel = viewModel,
         playlistNames = playlistNames,
         previewKey = previewKey,

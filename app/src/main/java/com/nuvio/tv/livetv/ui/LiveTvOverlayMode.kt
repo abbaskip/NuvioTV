@@ -353,27 +353,6 @@ private fun OverlayModeContent(
             OverlayLevel.GROUPS -> null
         }
         val cardChannelKey = if (level == OverlayLevel.CHANNELS) settledChannel?.key else scheduleChannel?.key
-        // 24/7 channels with no listing: what the channel plays, as the card.
-        val about = if (level == OverlayLevel.CHANNELS) rememberChannelAbout(settledChannel, card) else null
-        if (cardFits && card == null && about != null && !about.description.isNullOrBlank()) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 24.dp, end = 24.dp)
-                    .width(cardW)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(16.dp)
-            ) {
-                LiveText(about.name, size = osp(20f), weight = FontWeight.Bold, marquee = true, modifier = Modifier.fillMaxWidth())
-                aboutLine(about).takeIf { it.isNotBlank() }?.let {
-                    Spacer(Modifier.height(6.dp))
-                    LiveText(it, size = osp(13f), color = Color.White.copy(alpha = 0.75f))
-                }
-                Spacer(Modifier.height(8.dp))
-                ScrollingDescription(about.description.orEmpty(), size = osp(13f), color = Color.White.copy(alpha = 0.85f), maxLines = 6)
-            }
-        }
         rememberShowDetails(cardChannelKey, card)?.takeIf { cardFits }?.let { p ->
             Column(
                 modifier = Modifier

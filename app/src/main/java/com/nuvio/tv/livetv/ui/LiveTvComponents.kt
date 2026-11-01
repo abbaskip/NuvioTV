@@ -730,23 +730,6 @@ internal fun rememberShowDetails(channelKey: String?, program: EpgProgram?): Epg
     return state.value
 }
 
-/** Looks up what a 24/7 channel plays (see LiveTvViewModel.channelAbout). */
-internal val LocalChannelAbout = androidx.compose.runtime.staticCompositionLocalOf<suspend (com.nuvio.tv.livetv.model.LiveChannel, String?) -> com.nuvio.tv.domain.model.MetaPreview?> { { _, _ -> null } }
-
-/**
- * What a 24/7 channel plays (description, year, genres), when the channel has no real listing
- * for now. Null for normal channels and while looking it up.
- */
-@Composable
-internal fun rememberChannelAbout(channel: com.nuvio.tv.livetv.model.LiveChannel?, program: EpgProgram?): com.nuvio.tv.domain.model.MetaPreview? {
-    val loader = LocalChannelAbout.current
-    val noListing = channel != null && com.nuvio.tv.livetv.data.LiveTvPosterResolver.isChannelFiller(channel, program)
-    val state = androidx.compose.runtime.produceState<com.nuvio.tv.domain.model.MetaPreview?>(null, channel?.key, noListing, program?.title) {
-        value = if (channel != null && noListing) loader(channel, program?.title) else null
-    }
-    return state.value
-}
-
 /**
  * A guide description with the release year taken off its end ("… a can of Coke. (2009)"), and
  * the year to show next to the category instead, so it can't be cut off with the description.
@@ -773,14 +756,6 @@ internal fun metaWithYear(parts: List<String?>, year: Int?): String {
     val withYear = if (y != null && base.none { it.contains(y) }) base + y else base
     return withYear.joinToString("  ·  ")
 }
-
-/** "2014– · Comedy, Drama · ★ 8.1" for a 24/7 channel's show. */
-internal fun aboutLine(m: com.nuvio.tv.domain.model.MetaPreview): String =
-    listOfNotNull(
-        (m.releaseInfo ?: m.released)?.takeIf { it.isNotBlank() },
-        m.genres.take(2).joinToString(", ").takeIf { it.isNotBlank() },
-        m.imdbRating?.let { "★ " + String.format(java.util.Locale.US, "%.1f", it) }
-    ).joinToString("  ·  ")
 
 // ---------------------------------------------------------------- corner rounding
 
