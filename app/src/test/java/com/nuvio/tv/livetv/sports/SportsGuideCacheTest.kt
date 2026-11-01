@@ -27,11 +27,48 @@ class SportsGuideCacheTest {
         val channel = LiveChannel("channel", "playlist", "Test", "TNT Sports 2", null, null, null, "sports", "Sports", 1, "https://example.invalid")
         val found = SportsMatcher(db).guideEvents(start, start + 86_400_000, SportsCatalog.leagues,
             emptyList(), mapOf("channel" to channel), 0, start).sortedBy { it.startMs }
-        assertEquals(listOf("guide/motogp", "guide/motogp", "racing/f1", "racing/f1"), found.map { it.leagueId })
+        assertEquals(listOf("guide/motogp", "guide/motogp", "racing/f1"), found.map { it.leagueId })
         val onlyF1 = SportsMatcher(db).guideEvents(start, start + 86_400_000,
             SportsCatalog.leagues.filter { it.id == "racing/f1" }, emptyList(), mapOf("channel" to channel), 0, start)
-        assertEquals(listOf("Live: Formula 1: Singapore Grand Prix", "Live: Grand Prix"),
+        assertEquals(listOf("Live: Formula 1: Singapore Grand Prix"),
             onlyF1.sortedBy { it.startMs }.map { "Live: " + it.title })
+    }
+
+    @Test fun `Grand Prix alone does not identify Formula One but explicit title or description does`() {
+        val db = mockk<EpgDatabase>()
+        every { db.fingerprint() } returns "grand-prix"
+        every { db.contentRevision() } returns "1"
+        val start = 1_793_318_400_000L
+        val programmes = listOf(
+            "Live: ISU Grand Prix of Figure Skating" to "Skate Canada International - Men's free skate",
+            "Live: Grand Prix" to "World Judo Tour coverage",
+            "Live: FIM Speedway Grand Prix" to "Coverage of speedway racing",
+            "Live: MotoGP: Malaysian Grand Prix" to "Motorcycle racing",
+            "Live: Grand Prix" to null,
+            "Live: F1: British Grand Prix" to null,
+            "Live: Formula One: British Grand Prix" to null,
+            "Live: British Grand Prix" to "Formula 1 race coverage from Silverstone")
+        every { db.visitPrograms(any(), any(), any()) } answers {
+            programmes.forEachIndexed { i, (title, description) ->
+                thirdArg<(String, EpgProgram) -> Unit>().invoke("channel",
+                    EpgProgram(start + i * 3_600_000L, start + (i + 1) * 3_600_000L, title, description))
+            }
+        }
+        val channel = LiveChannel("channel", "playlist", "Test", "Sports", null, null, null,
+            "sports", "Sports", 1, "https://example.invalid")
+        val cache = temp.newFolder()
+        val legacy = SportsCatalog.leagues.map { league ->
+            if (league.id == "racing/f1") league.copy(guideWords = league.guideWords + "Grand Prix") else league
+        }
+        SportsMatcher(db, cache).guideEvents(start, start + 86_400_000, legacy,
+            emptyList(), mapOf("channel" to channel), 0, start)
+        for (leagues in listOf(SportsCatalog.leagues, SportsCatalog.leagues.filter { it.id == "racing/f1" })) {
+            val f1 = SportsMatcher(db, cache).guideEvents(start, start + 86_400_000, leagues,
+                emptyList(), mapOf("channel" to channel), 0, start).filter { it.leagueId == "racing/f1" }
+            assertEquals(programmes.takeLast(3).map { SportsMatcher.cleanTitle(it.first) },
+                f1.sortedBy { it.startMs }.map { it.title })
+        }
+        verify(exactly = 3) { db.visitPrograms(any(), any(), any()) }
     }
 
     @Test fun `completed discovery survives process restart but guide channels and settings invalidate it`() {

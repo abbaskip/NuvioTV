@@ -230,7 +230,7 @@ object SportsCatalog {
             regions = setOf("US", "CA", "UK", "OTHER"), guideOnly = true, kind = LeagueKind.EVENT, color = 0xFF3A3A3A),
         // ---- Racing
         League("racing/f1", Sport.RACING, "Formula 1", "F1", "racing/f1", LeagueKind.EVENT,
-            guideWords = listOf("Formula 1", "F1", "Grand Prix"), regions = EVERYWHERE, minutes = 120, color = 0xFFE10600),
+            guideWords = listOf("Formula 1", "Formula One", "F1"), regions = EVERYWHERE, minutes = 120, color = 0xFFE10600),
         League("racing/nascar-premier", Sport.RACING, "NASCAR Cup", "NASCAR", "racing/nascar-premier", LeagueKind.EVENT,
             guideWords = listOf("NASCAR"), regions = US, minutes = 210, color = 0xFF007AC2),
         League("racing/irl", Sport.RACING, "IndyCar", "INDY", "racing/irl", LeagueKind.EVENT, guideWords = listOf("IndyCar"),
