@@ -34,4 +34,26 @@ class SportsRefreshPolicyTest {
         assertEquals(listOf(leagues[0]), choose(list = listOf(event)))
     }
 
+    @Test fun `followed leagues cannot starve other live scores over repeated rounds`() {
+        val attempts = mutableMapOf<String, Long>()
+        val visited = mutableSetOf<String>()
+        repeat(4) { round ->
+            val at = now + round * 30_000L
+            val due = SportsRefreshPolicy.choose(events, leagues, null, emptySet(),
+                leagues.take(4).map { it.id }.toSet(), true, at, attempts)
+            due.forEach { attempts[it.id] = at; visited += it.id }
+        }
+        assertEquals(leagues.map { it.id }.toSet(), visited)
+    }
+
+    @Test fun `focused game remains first even when other leagues have never refreshed`() {
+        assertEquals(leagues[3], choose(focused = events[3].id,
+            attempts = mapOf(leagues[3].id to now - 60_000)).first())
+    }
+
+    @Test fun `expired timestamps and never attempted leagues sort together without mixed numeric types`() {
+        val due = choose(attempts = mapOf(leagues[0].id to now - 60_000))
+        assertEquals(listOf(leagues[1], leagues[2]), due)
+    }
+
 }

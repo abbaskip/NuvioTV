@@ -1,0 +1,253 @@
+{
+  "header": {
+    "competitions": [
+      {
+        "competitors": [
+          {
+            "team": {
+              "id": "3",
+              "abbreviation": "NO"
+            }
+          },
+          {
+            "team": {
+              "id": "1",
+              "abbreviation": "ATL"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "boxscore": {
+    "teams": [
+      {
+        "team": {
+          "id": "1"
+        },
+        "statistics": [
+          {
+            "name": "fieldGoalPct",
+            "displayValue": "39",
+            "label": "Field Goal %"
+          },
+          {
+            "name": "totalRebounds",
+            "displayValue": "24",
+            "label": "Rebounds"
+          },
+          {
+            "name": "assists",
+            "displayValue": "12",
+            "label": "Assists"
+          },
+          {
+            "name": "turnovers",
+            "displayValue": "14",
+            "label": "Turnovers"
+          }
+        ],
+        "homeAway": "away"
+      },
+      {
+        "team": {
+          "id": "3"
+        },
+        "statistics": [
+          {
+            "name": "fieldGoalPct",
+            "displayValue": "56",
+            "label": "Field Goal %"
+          },
+          {
+            "name": "totalRebounds",
+            "displayValue": "32",
+            "label": "Rebounds"
+          },
+          {
+            "name": "assists",
+            "displayValue": "18",
+            "label": "Assists"
+          },
+          {
+            "name": "turnovers",
+            "displayValue": "15",
+            "label": "Turnovers"
+          }
+        ],
+        "homeAway": "home"
+      }
+    ]
+  },
+  "leaders": [
+    {
+      "team": {
+        "id": "3"
+      },
+      "leaders": [
+        {
+          "name": "points",
+          "displayName": "Points",
+          "leaders": [
+            {
+              "displayValue": "15",
+              "athlete": {
+                "displayName": "Jeremiah Fears"
+              }
+            }
+          ]
+        },
+        {
+          "name": "assists",
+          "displayName": "Assists",
+          "leaders": [
+            {
+              "displayValue": "5",
+              "athlete": {
+                "displayName": "Jeremiah Fears"
+              }
+            }
+          ]
+        },
+        {
+          "name": "rebounds",
+          "displayName": "Rebounds",
+          "leaders": [
+            {
+              "displayValue": "8",
+              "athlete": {
+                "displayName": "Karlo Matkovic"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "team": {
+        "id": "1"
+      },
+      "leaders": [
+        {
+          "name": "points",
+          "displayName": "Points",
+          "leaders": [
+            {
+              "displayValue": "14",
+              "athlete": {
+                "displayName": "CJ McCollum"
+              }
+            }
+          ]
+        },
+        {
+          "name": "assists",
+          "displayName": "Assists",
+          "leaders": [
+            {
+              "displayValue": "4",
+              "athlete": {
+                "displayName": "Kingston Flemings"
+              }
+            }
+          ]
+        },
+        {
+          "name": "rebounds",
+          "displayName": "Rebounds",
+          "leaders": [
+            {
+              "displayValue": "8",
+              "athlete": {
+                "displayName": "Onyeka Okongwu"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "plays": [
+    {
+      "id": "401909898441",
+      "sequenceNumber": "441",
+      "type": {
+        "id": "131",
+        "text": "Pullup Jump Shot"
+      },
+      "text": "Saddiq Bey makes 9-foot pullup jump shot (Jeremiah Fears assists)",
+      "awayScore": 60,
+      "homeScore": 80,
+      "period": {
+        "number": 3,
+        "displayValue": "3rd Quarter"
+      },
+      "clock": {
+        "displayValue": "5:46"
+      },
+      "scoringPlay": true,
+      "scoreValue": 2,
+      "team": {
+        "id": "3"
+      },
+      "participants": [
+        {
+          "athlete": {
+            "id": "4397136"
+          }
+        },
+        {
+          "athlete": {
+            "id": "5144091"
+          }
+        }
+      ],
+      "wallclock": "2026-11-01T00:40:07Z",
+      "shootingPlay": true,
+      "coordinate": {
+        "x": 18,
+        "y": 7
+      },
+      "pointsAttempted": 2,
+      "shortDescription": "+2 Points"
+    },
+    {
+      "id": "401909898445",
+      "sequenceNumber": "445",
+      "type": {
+        "id": "98",
+        "text": "Free Throw - 1 of 2"
+      },
+      "text": "Luguentz Dort makes free throw 1 of 2",
+      "awayScore": 61,
+      "homeScore": 80,
+      "period": {
+        "number": 3,
+        "displayValue": "3rd Quarter"
+      },
+      "clock": {
+        "displayValue": "5:35"
+      },
+      "scoringPlay": true,
+      "scoreValue": 1,
+      "team": {
+        "id": "1"
+      },
+      "participants": [
+        {
+          "athlete": {
+            "id": "4397020"
+          }
+        }
+      ],
+      "wallclock": "2026-11-01T00:40:46Z",
+      "shootingPlay": true,
+      "coordinate": {
+        "x": -214748340,
+        "y": -214748365
+      },
+      "pointsAttempted": 1,
+      "shortDescription": "+1 Point"
+    }
+  ]
+}

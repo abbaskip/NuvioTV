@@ -257,6 +257,22 @@ class SportsRepository @Inject constructor(
                     delay(30_000)
                 }
             }
+            // Live scores must not wait for catalogue downloads or followed teams' full seasons.
+            launch {
+                while (true) {
+                    if (baseFeed.enabled && foreground.value) {
+                        runCatching { updateSharedScores(System.currentTimeMillis()) }
+                            .onFailure {
+                                currentCoroutineContext().ensureActive()
+                                Log.w(TAG, "Live score update failed; will retry", it)
+                            }
+                    }
+                    val lastKick = kick.value
+                    withTimeoutOrNull(if (viewers.value > 0) 10_000L else 30_000L) {
+                        kick.first { it != lastKick }
+                    }
+                }
+            }
             runCatching { updateLoop() }.onFailure { Log.w(TAG, "Sports updates stopped", it) }
         }
         scope.launch { matchLoop() }
@@ -328,7 +344,6 @@ class SportsRepository @Inject constructor(
                         tsdbData.value = emptyMap()
                     }
                 }
-                runCatching { updateSharedScores(System.currentTimeMillis()) }
                 // Personal full-season requests remain tied to followed teams, while Sports is open.
                 if (viewers.value > 0) runCatching { updateSchedules(System.currentTimeMillis(), false) }
             } else if (active) {
@@ -393,7 +408,12 @@ class SportsRepository @Inject constructor(
                 val prior = leagueData.value[league.id]?.events.orEmpty().filter { it.startMs >= now - DAY }
                 leagueData.update { it + (league.id to LeagueData((parsed + prior).distinctBy { e -> e.id }, now, null)) }
                 _problem.value = null
-            }.onFailure { _problem.value = "Live scores unavailable; showing saved schedules and results." }
+                Log.d(TAG, "Live scores: ${league.id}, ${parsed.size} games, ${parsed.count { it.state == GameState.LIVE }} live")
+            }.onFailure {
+                currentCoroutineContext().ensureActive()
+                _problem.value = "Live scores unavailable; showing saved schedules and results."
+                Log.w(TAG, "Live scoreboard failed for ${league.id}: ${describe(it)}")
+            }
         }
         rebuildLiveScores()
     }

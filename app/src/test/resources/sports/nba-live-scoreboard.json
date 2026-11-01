@@ -1,0 +1,113 @@
+{
+  "events": [
+    {
+      "id": "401909898",
+      "date": "2026-10-31T23:00Z",
+      "name": "Atlanta Hawks at New Orleans Pelicans",
+      "shortName": "ATL @ NO",
+      "status": {
+        "clock": 300.0,
+        "displayClock": "5:00",
+        "period": 3,
+        "type": {
+          "id": "2",
+          "name": "STATUS_IN_PROGRESS",
+          "state": "in",
+          "completed": false,
+          "description": "In Progress",
+          "detail": "5:00 - 3rd Quarter",
+          "shortDetail": "5:00 - 3rd"
+        }
+      },
+      "competitions": [
+        {
+          "id": "401909898",
+          "date": "2026-10-31T23:00Z",
+          "status": {
+            "clock": 300.0,
+            "displayClock": "5:00",
+            "period": 3,
+            "type": {
+              "id": "2",
+              "name": "STATUS_IN_PROGRESS",
+              "state": "in",
+              "completed": false,
+              "description": "In Progress",
+              "detail": "5:00 - 3rd Quarter",
+              "shortDetail": "5:00 - 3rd"
+            }
+          },
+          "competitors": [
+            {
+              "id": "3",
+              "homeAway": "home",
+              "team": {
+                "id": "3",
+                "name": "Pelicans",
+                "abbreviation": "NO",
+                "displayName": "New Orleans Pelicans",
+                "shortDisplayName": "Pelicans"
+              },
+              "score": "80",
+              "linescores": [
+                {
+                  "value": 35.0,
+                  "displayValue": "35",
+                  "period": 1
+                },
+                {
+                  "value": 28.0,
+                  "displayValue": "28",
+                  "period": 2
+                },
+                {
+                  "value": 17.0,
+                  "displayValue": "17",
+                  "period": 3
+                }
+              ]
+            },
+            {
+              "id": "1",
+              "homeAway": "away",
+              "team": {
+                "id": "1",
+                "name": "Hawks",
+                "abbreviation": "ATL",
+                "displayName": "Atlanta Hawks",
+                "shortDisplayName": "Hawks"
+              },
+              "score": "64",
+              "linescores": [
+                {
+                  "value": 18.0,
+                  "displayValue": "18",
+                  "period": 1
+                },
+                {
+                  "value": 30.0,
+                  "displayValue": "30",
+                  "period": 2
+                },
+                {
+                  "value": 16.0,
+                  "displayValue": "16",
+                  "period": 3
+                }
+              ]
+            }
+          ],
+          "venue": {
+            "id": "985",
+            "fullName": "Smoothie King Center",
+            "address": {
+              "city": "New Orleans",
+              "state": "LA"
+            },
+            "indoor": true
+          }
+        }
+      ]
+    }
+  ]
+}

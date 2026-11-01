@@ -145,7 +145,8 @@ internal object SportsRefreshPolicy {
             else -> 2
         }
         return current.keys.filter { id -> (viewing || priority(id) == 0) && now - (attempts[id] ?: 0) >= 60_000 }
-            .sortedWith(compareBy<String> { priority(it) }.thenBy { attempts[it] ?: 0 })
+            .sortedWith(compareBy<String> { if (priority(it) == 0) 0 else 1 }
+                .thenBy { attempts[it] ?: 0L }.thenBy { priority(it) })
             .take(2).mapNotNull(byId::get)
     }
 }
