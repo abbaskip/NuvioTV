@@ -135,8 +135,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         minSdk = 24
         targetSdk = 36
-        versionCode = 10004
-        versionName = "0.1.0-beta.3.1"
+        versionCode = 10005
+        versionName = "0.1.0-beta.3.2"
 
         buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
         buildConfigField("String", "INTRODB_API_URL", "\"${localProperties.getProperty("INTRODB_API_URL", "")}\"")
