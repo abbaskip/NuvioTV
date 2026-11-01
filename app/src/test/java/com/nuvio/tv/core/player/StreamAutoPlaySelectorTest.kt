@@ -333,6 +333,32 @@ class StreamAutoPlaySelectorTest {
         assertEquals(listOf(regular, cachedDebrid), ordered)
     }
 
+    @Test fun `disabling every automatic source retains independent Reuse Last Link behaviour`() {
+        val settings = com.nuvio.tv.data.local.PlayerSettings(streamAutoPlayMode = StreamAutoPlayMode.FIRST_STREAM,
+            streamAutoPlayAddonsEnabled = false, streamAutoPlayPluginsEnabled = false,
+            streamAutoPlayPlaylistsEnabled = false, streamReuseLastLinkEnabled = false)
+        assertEquals(false, StreamAutoPlayPolicy.isEffectivelyEnabled(settings))
+        assertEquals(true, StreamAutoPlayPolicy.isEffectivelyEnabled(settings.copy(streamReuseLastLinkEnabled = true)))
+    }
+    @Test fun `IPTV autoplay is opt in and cannot bypass the switch through binge reuse`() {
+        val iptv = stream("IPTV · One", "https://example.test/a", bingeGroup = "playlist-one").copy(iptvPlaylistId = "one")
+        val addon = stream("AddonA", "https://example.test/b")
+        val settings = com.nuvio.tv.data.local.PlayerSettings()
+        assertEquals(listOf(addon), StreamAutoPlaySelector.automaticStreams(listOf(iptv, addon), settings, setOf("AddonA", "IPTV · One")))
+        assertNull(StreamAutoPlaySelector.selectAutoPlayStream(listOf(iptv), StreamAutoPlayMode.MANUAL, "", StreamAutoPlaySource.ALL_SOURCES,
+            setOf("IPTV · One"), emptySet(), emptySet(), "playlist-one", true, true, settings))
+    }
+    @Test fun `playlist only autoplay works independently of addons and plugins`() {
+        val iptv = stream("IPTV · One", "https://example.test/a").copy(iptvPlaylistId = "one")
+        val addon = stream("AddonA", "https://example.test/b")
+        val plugin = stream("Plugin", "https://example.test/c")
+        val settings = com.nuvio.tv.data.local.PlayerSettings(streamAutoPlayAddonsEnabled = false,
+            streamAutoPlayPluginsEnabled = false, streamAutoPlayPlaylistsEnabled = true)
+        assertEquals(iptv, StreamAutoPlaySelector.selectAutoPlayStream(listOf(addon, plugin, iptv), StreamAutoPlayMode.FIRST_STREAM, "",
+            StreamAutoPlaySource.ALL_SOURCES, setOf("AddonA", "IPTV · One"), emptySet(), emptySet(), sourceSettings = settings))
+        assertEquals(emptyList<Stream>(), StreamAutoPlaySelector.automaticStreams(listOf(addon, plugin, iptv), settings.copy(streamAutoPlayPlaylistsEnabled = false), setOf("AddonA", "IPTV · One")))
+    }
+
     private fun stream(
         addonName: String,
         url: String? = null,

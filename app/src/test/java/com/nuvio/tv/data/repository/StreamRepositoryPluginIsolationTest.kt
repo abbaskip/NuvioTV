@@ -171,7 +171,68 @@ class StreamRepositoryPluginIsolationTest {
         assertTrue(groups.single { it.addonName == "Fast Addon" }.streams.all { it.pluginSourceName == null })
     }
 
-    private fun newHarness(enabledScrapers: List<ScraperInfo>): Harness {
+    private fun playlistAddon() = compatibleAddon().copy(id = "iptv-playlist:one", name = "IPTV · One",
+        displayName = "IPTV · One", baseUrl = "iptv-playlist:one", resources = listOf(AddonResource("stream", listOf("movie", "series"), null)))
+    private fun playlistStream() = com.nuvio.tv.domain.model.Stream(name = "IPTV", title = "Verified copy", description = null,
+        url = "https://media.example.test/verified", ytId = null, infoHash = null, fileIdx = null, externalUrl = null,
+        behaviorHints = null, addonName = "IPTV · One", addonLogo = null, iptvPlaylistId = "one")
+
+    @Test fun `normal addon results arrive while IPTV catalogue matching is pending`() = runBlocking {
+        val sources = mockk<com.nuvio.tv.livetv.ondemand.IptvStreamSources>()
+        val loader = mockk<com.nuvio.tv.livetv.ondemand.IptvVodStreams>()
+        every { sources.sources() } returns flowOf(listOf(compatibleAddon(), playlistAddon()))
+        coEvery { loader.revision() } returns "catalogue-1"
+        val pending = CompletableDeferred<com.nuvio.tv.livetv.ondemand.VodStreamTarget?>()
+        coEvery { loader.prepare(any(), any(), any(), any(), any()) } coAnswers { pending.await() }
+        coEvery { loader.load(any(), any(), any(), any()) } returns listOf(playlistStream())
+        val h = newHarness(emptyList(), sources, loader)
+        val first = withTimeout(1_000) { h.repository.getStreamsFromAllAddons("movie", "tt1341338").first { it is NetworkResult.Success } }
+        assertEquals(listOf("Fast Addon"), (first as NetworkResult.Success).data.map { it.addonName })
+        assertTrue(pending.isActive)
+        pending.complete(com.nuvio.tv.livetv.ondemand.VodStreamTarget(com.nuvio.tv.livetv.ondemand.VodKind.MOVIE, null, "Synthetic", 2020))
+        coVerify(exactly = 1) { h.api.getStreams(any()) }
+    }
+
+    @Test fun `IPTV failure cannot discard normal addon results or fetch a virtual manifest`() = runBlocking {
+        val sources = mockk<com.nuvio.tv.livetv.ondemand.IptvStreamSources>()
+        val loader = mockk<com.nuvio.tv.livetv.ondemand.IptvVodStreams>()
+        every { sources.sources() } returns flowOf(listOf(compatibleAddon(), playlistAddon()))
+        coEvery { loader.revision() } returns "catalogue-1"
+        coEvery { loader.prepare(any(), any(), any(), any(), any()) } throws IllegalStateException("Synthetic unavailable catalogue")
+        val h = newHarness(emptyList(), sources, loader)
+        val results = h.repository.getStreamsFromAllAddons("movie", "tt1341338").toList()
+        assertEquals(listOf("Fast Addon"), (results.last() as NetworkResult.Success).data.map { it.addonName })
+        coVerify(exactly = 1) { h.api.getStreams(any()) }
+        assertTrue(h.repository.getStreamsFromAddon(playlistAddon(), "movie", "tt1341338") is NetworkResult.Error)
+        coVerify(exactly = 1) { h.api.getStreams(any()) }
+    }
+
+    @Test fun `same numeric request with different selected episode identities uses separate cached searches`() = runBlocking {
+        val sources = mockk<com.nuvio.tv.livetv.ondemand.IptvStreamSources>()
+        val loader = mockk<com.nuvio.tv.livetv.ondemand.IptvVodStreams>()
+        every { sources.sources() } returns flowOf(listOf(compatibleAddon().copy(resources = listOf(AddonResource("stream", listOf("series"), null))), playlistAddon()))
+        coEvery { loader.revision() } returns "catalogue-1"
+        coEvery { loader.prepare(any(), any(), any(), any(), any()) } returns com.nuvio.tv.livetv.ondemand.VodStreamTarget(
+            com.nuvio.tv.livetv.ondemand.VodKind.SERIES, "2316", "The Office", 2005, setOf("Business Ethics"))
+        coEvery { loader.load(any(), any(), any(), any()) } returns listOf(playlistStream())
+        val h = newHarness(emptyList(), sources, loader)
+        val first = com.nuvio.tv.domain.model.StreamContentContext("tt0386676", "The Office", 2005, "Business Ethics",
+            com.nuvio.tv.domain.model.TvdbPlaybackContext(73244, "alternate", 100, 5, 3, listOf(200), "tt0386676:5:3"))
+        h.repository.getStreamsFromAllAddons("series", "tt0386676:5:3", 5, 3, contentContext = first).toList()
+        h.repository.getStreamsFromAllAddons("series", "tt0386676:5:3", 5, 3, contentContext = first).toList()
+        val second = first.copy(episodeTitle = "Baby Shower", tvdb = first.tvdb!!.copy(orderType = "official", episodeId = 201, episodeIds = listOf(201)))
+        h.repository.getStreamsFromAllAddons("series", "tt0386676:5:3", 5, 3, contentContext = second).toList()
+        coVerify(exactly = 2) { loader.prepare("series", "tt0386676:5:3", 5, 3, any()) }
+        coVerify { loader.prepare("series", "tt0386676:5:3", 5, 3, first) }
+        coVerify { loader.prepare("series", "tt0386676:5:3", 5, 3, second) }
+        coVerify(exactly = 2) { h.api.getStreams(match { java.net.URLDecoder.decode(it, "UTF-8").endsWith("/stream/series/tt0386676:5:3.json") }) }
+        // Neither IPTV catalogue matching nor its identity context changes Stremio coordinates.
+        coVerify(exactly = 0) { h.api.getStreams(match { it.contains("iptv-playlist:") }) }
+    }
+
+    private fun newHarness(enabledScrapers: List<ScraperInfo>,
+        iptvSources: com.nuvio.tv.livetv.ondemand.IptvStreamSources? = null,
+        iptvStreams: com.nuvio.tv.livetv.ondemand.IptvVodStreams? = null): Harness {
         val addon = compatibleAddon()
         val api = mockk<AddonApi>()
         coEvery { api.getStreams(any()) } returns Response.success(
@@ -224,6 +285,8 @@ class StreamRepositoryPluginIsolationTest {
                 tmdbService = tmdbService,
                 debridStreamPresentation = presentation,
                 localDebridAvailabilityService = availability,
+                iptvSources = iptvSources,
+                iptvStreams = iptvStreams,
                 serverStreams = mockk {
                     every { isNativeRequest(any()) } returns false
                     every { revision } returns 0

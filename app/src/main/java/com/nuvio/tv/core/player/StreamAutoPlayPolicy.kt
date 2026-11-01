@@ -6,6 +6,11 @@ import com.nuvio.tv.data.local.StreamAutoPlayMode
 object StreamAutoPlayPolicy {
     fun isEffectivelyEnabled(playerSettings: PlayerSettings): Boolean {
         if (playerSettings.streamReuseLastLinkEnabled) return true
+        val addons = playerSettings.streamAutoPlayAddonsEnabled
+            ?: (playerSettings.streamAutoPlaySource != com.nuvio.tv.data.local.StreamAutoPlaySource.ENABLED_PLUGINS_ONLY)
+        val plugins = com.nuvio.tv.core.build.AppFeaturePolicy.pluginsEnabled && (playerSettings.streamAutoPlayPluginsEnabled
+            ?: (playerSettings.streamAutoPlaySource != com.nuvio.tv.data.local.StreamAutoPlaySource.INSTALLED_ADDONS_ONLY))
+        if (!addons && !plugins && !playerSettings.streamAutoPlayPlaylistsEnabled) return false
         if (playerSettings.streamAutoPlayReuseBingeGroup &&
             playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode) return true
 

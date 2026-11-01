@@ -109,7 +109,8 @@ class PlayerRuntimeController(
     internal val party: com.nuvio.tv.core.party.PartyRepository,
     internal val profileId: Int,
     savedStateHandle: SavedStateHandle,
-    internal val scope: CoroutineScope
+    internal val scope: CoroutineScope,
+    internal val iptvSources: com.nuvio.tv.livetv.ondemand.IptvStreamSources? = null
 ) {
 
     /** Resolved once so every `context.getString(...)` here follows the app language. */

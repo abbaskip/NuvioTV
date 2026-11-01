@@ -25,6 +25,8 @@ internal fun driveBackupData(envelope: JSONObject): JSONObject {
     }
     if (data.has("reseq_shuffle_version")) require(data.getJSONObject("reseq_shuffle_version").getString("t") == "i" &&
         data.getJSONObject("reseq_shuffle_version").getInt("v") == 1) { "Unsupported Shuffle backup format" }
+    if (data.has("reseq_sources_version")) require(data.getJSONObject("reseq_sources_version").getString("t") == "i" &&
+        data.getJSONObject("reseq_sources_version").getInt("v") == 1) { "Unsupported stream-source backup format" }
     for (key in listOf("playlists", "epg_sources")) {
         if (!data.has(key)) continue
         val entry = data.getJSONObject(key)
@@ -41,6 +43,10 @@ internal fun driveBackupData(envelope: JSONObject): JSONObject {
         if (key.startsWith("reseq_tvdb:")) {
             require(data.has("reseq_tvdb_version") && key.substringAfter(":").substringBefore(":").toIntOrNull() in 1..6 &&
                 data.getJSONObject(key).getString("t") == "str") { "Invalid profile episode-order preference" }
+        }
+        if (key.startsWith("reseq_sources:")) {
+            require(data.has("reseq_sources_version") && key.substringAfter(":").substringBefore(":").toIntOrNull() in 1..6 &&
+                data.getJSONObject(key).getString("t") == "str") { "Invalid profile stream-source preference" }
         }
         if (key.startsWith("reseq_shuffle:")) {
             require(data.has("reseq_shuffle_version") && key.substringAfter(":").substringBefore(":").toIntOrNull() in 1..6 &&

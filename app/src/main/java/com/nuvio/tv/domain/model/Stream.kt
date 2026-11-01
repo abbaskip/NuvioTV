@@ -30,7 +30,8 @@ data class Stream(
     val badges: List<StreamBadge> = emptyList(),
     val subtitles: List<Subtitle> = emptyList(),
     val serverTarget: ServerPlaybackTarget? = null,
-    val pluginSourceName: String? = null
+    val pluginSourceName: String? = null,
+    val iptvPlaylistId: String? = null
 ) {
     /**
      * Returns the primary stream source URL

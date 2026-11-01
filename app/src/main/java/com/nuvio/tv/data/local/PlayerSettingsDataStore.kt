@@ -318,6 +318,9 @@ data class PlayerSettings(
     // Stream selection settings
     val streamAutoPlayMode: StreamAutoPlayMode = StreamAutoPlayMode.MANUAL,
     val streamAutoPlaySource: StreamAutoPlaySource = StreamAutoPlaySource.ALL_SOURCES,
+    val streamAutoPlayAddonsEnabled: Boolean? = null,
+    val streamAutoPlayPluginsEnabled: Boolean? = null,
+    val streamAutoPlayPlaylistsEnabled: Boolean = false,
     val streamAutoPlaySelectedAddons: Set<String> = emptySet(),
     val streamAutoPlaySelectedPlugins: Set<String> = emptySet(),
     val streamAutoPlayRegex: String = "",
@@ -642,6 +645,9 @@ class PlayerSettingsDataStore @Inject constructor(
     private val frameRateMatchingModeKey = stringPreferencesKey("frame_rate_matching_mode")
     private val resolutionMatchingEnabledKey = booleanPreferencesKey("resolution_matching_enabled")
     private val streamAutoPlayModeKey = stringPreferencesKey("stream_auto_play_mode")
+    private val streamAutoPlayAddonsEnabledKey = booleanPreferencesKey("stream_auto_play_addons_enabled")
+    private val streamAutoPlayPluginsEnabledKey = booleanPreferencesKey("stream_auto_play_plugins_enabled")
+    private val streamAutoPlayPlaylistsEnabledKey = booleanPreferencesKey("stream_auto_play_playlists_enabled")
     private val streamAutoPlaySourceKey = stringPreferencesKey("stream_auto_play_source")
     private val streamAutoPlaySelectedAddonsKey = stringSetPreferencesKey("stream_auto_play_selected_addons")
     private val streamAutoPlaySelectedPluginsKey = stringSetPreferencesKey("stream_auto_play_selected_plugins")
@@ -1043,6 +1049,9 @@ class PlayerSettingsDataStore @Inject constructor(
                 streamAutoPlaySource = prefs[streamAutoPlaySourceKey]?.let {
                     runCatching { StreamAutoPlaySource.valueOf(it) }.getOrDefault(StreamAutoPlaySource.ALL_SOURCES)
                 } ?: StreamAutoPlaySource.ALL_SOURCES,
+                streamAutoPlayAddonsEnabled = prefs[streamAutoPlayAddonsEnabledKey],
+                streamAutoPlayPluginsEnabled = prefs[streamAutoPlayPluginsEnabledKey],
+                streamAutoPlayPlaylistsEnabled = prefs[streamAutoPlayPlaylistsEnabledKey] ?: false,
                 streamAutoPlaySelectedAddons = prefs[streamAutoPlaySelectedAddonsKey] ?: emptySet(),
                 streamAutoPlaySelectedPlugins = prefs[streamAutoPlaySelectedPluginsKey] ?: emptySet(),
                 streamAutoPlayRegex = prefs[streamAutoPlayRegexKey] ?: "",
@@ -1396,6 +1405,10 @@ class PlayerSettingsDataStore @Inject constructor(
             prefs[streamAutoPlayModeKey] = mode.name
         }
     }
+
+    suspend fun setStreamAutoPlayAddonsEnabled(enabled: Boolean) { store().edit { it[streamAutoPlayAddonsEnabledKey] = enabled } }
+    suspend fun setStreamAutoPlayPluginsEnabled(enabled: Boolean) { store().edit { it[streamAutoPlayPluginsEnabledKey] = enabled } }
+    suspend fun setStreamAutoPlayPlaylistsEnabled(enabled: Boolean) { store().edit { it[streamAutoPlayPlaylistsEnabledKey] = enabled } }
 
     suspend fun setStreamAutoPlaySource(source: StreamAutoPlaySource) {
         store().edit { prefs ->

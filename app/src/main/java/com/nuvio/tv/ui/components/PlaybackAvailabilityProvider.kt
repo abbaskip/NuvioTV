@@ -31,7 +31,8 @@ internal class PlaybackAvailabilityViewModel @Inject constructor(
     pluginDataStore: PluginDataStore,
     metaRepository: MetaRepository,
     serverRepository: ServerRepository,
-    serverStreams: ServerStreams
+    serverStreams: ServerStreams,
+    iptvSources: com.nuvio.tv.livetv.ondemand.IptvStreamSources? = null
 ) : ViewModel() {
     private val enabledScrapers = if (AppFeaturePolicy.pluginsEnabled) {
         combine(pluginDataStore.scrapers, pluginDataStore.pluginsEnabled) { scrapers, enabled ->
@@ -42,7 +43,7 @@ internal class PlaybackAvailabilityViewModel @Inject constructor(
     }
 
     val availability = combine(
-        addonRepository.getInstalledAddons(),
+        iptvSources?.sources() ?: addonRepository.getInstalledAddons(),
         enabledScrapers,
         serverRepository.uiState
     ) { addons, scrapers, _ ->

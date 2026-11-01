@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -77,7 +78,10 @@ data class VodEpisode(
     val plot: String?,
     val image: String?,
     val url: String,
-    val tech: VodTech? = null
+    val tech: VodTech? = null,
+    val imdbId: String? = null,
+    val tmdbId: Long? = null,
+    val tvdbId: Long? = null
 )
 
 /** What the provider says about a movie or series (for the fallback detail screen). */
@@ -89,7 +93,9 @@ data class VodInfo(
     val releaseDate: String?,
     val durationText: String?,
     val episodes: List<VodEpisode> = emptyList(),
-    val tech: VodTech? = null
+    val tech: VodTech? = null,
+    val tmdbId: String? = null,
+    val imdbId: String? = null
 )
 
 data class OnDemandStatus(val loading: Boolean = false, val message: String? = null)
@@ -134,6 +140,11 @@ class OnDemandRepository @Inject constructor(
     private val _status = MutableStateFlow(OnDemandStatus())
     val status: StateFlow<OnDemandStatus> = _status.asStateFlow()
 
+    private val detailHttp = http.newBuilder().readTimeout(20, TimeUnit.SECONDS).callTimeout(30, TimeUnit.SECONDS).build()
+    private val prefixMutex = Mutex()
+    private var prefixesReady = false
+    private val infoLocks = ConcurrentHashMap<String, Mutex>()
+    private val detailRequests = kotlinx.coroutines.sync.Semaphore(4)
     private val infoCache = com.nuvio.tv.livetv.data.boundedCache<String, VodInfo>(300)
     /** The last import problem, shown in settings (cleared by a clean import). */
     @Volatile private var lastProblem: String? = null
@@ -146,17 +157,6 @@ class OnDemandRepository @Inject constructor(
     fun start() {
         if (started) return
         started = true
-        scope.launch {
-            kotlinx.coroutines.flow.combine(hasContent, prefs.settings) { has, s -> has && s.onDemandInStreams }
-                .collect { OnDemandStreams.offeredInStreams = it }
-        }
-        scope.launch {
-            // Auto-play may pick your provider's copy only when that's on and its tab is first.
-            prefs.settings.collect { s ->
-                OnDemandStreams.autoPlayAllowed = s.onDemandAutoPlay && s.onDemandStreamsPosition == "FIRST"
-                OnDemandStreams.tabPosition = s.onDemandStreamsPosition
-            }
-        }
         // Start-up upkeep and the automatic catalog check: low priority, out of the screen's way.
         scope.launch(com.nuvio.tv.livetv.data.BackgroundWork.quiet) {
             // A failed check (database busy) keeps the current answer instead of hiding On Demand.
@@ -561,11 +561,15 @@ class OnDemandRepository @Inject constructor(
 
     /** Provider details for a movie or series (series include every episode). Cached. */
     suspend fun info(item: VodItem): VodInfo? = withContext(Dispatchers.IO) {
-        infoCache[item.uid]?.let { return@withContext it }
         val pl = playlist(item.playlistId) ?: return@withContext null
+        val cacheKey = item.uid + ":" + _version.value + ":" + java.security.MessageDigest.getInstance("SHA-256").digest(
+            listOf(pl.xtreamServer, pl.xtreamUsername, pl.xtreamPassword, pl.userAgent).joinToString("\u0000").toByteArray()).joinToString("") { "%02x".format(it) }
+        infoCache[cacheKey]?.let { return@withContext it }
+        infoLocks.getOrPut(cacheKey) { Mutex() }.withLock {
+        infoCache[cacheKey]?.let { return@withLock it }
         val api = pl.xtreamApiUrl()
         val action = if (item.kind == VodKind.MOVIE) "get_vod_info&vod_id=${item.id}" else "get_series_info&series_id=${item.id}"
-        val json = runCatching { JSONObject(getText("$api&action=$action", pl.userAgent)) }.getOrNull() ?: return@withContext null
+        val json = runCatching { JSONObject(getText("$api&action=$action", pl.userAgent, detailHttp)) }.getOrNull() ?: return@withLock null
         val info = json.optJSONObject("info") ?: JSONObject()
         val episodes = ArrayList<VodEpisode>()
         json.optJSONObject("episodes")?.let { byseason ->
@@ -587,7 +591,10 @@ class OnDemandRepository @Inject constructor(
                         plot = einfo?.optString("plot")?.takeIf { it.isNotBlank() },
                         image = einfo?.optString("movie_image")?.takeIf { it.startsWith("http") },
                         url = "${pl.xtreamBase()}/series/${enc(pl.xtreamUsername)}/${enc(pl.xtreamPassword)}/$id.$ext",
-                        tech = einfo?.let { parseTech(it) }
+                        tech = einfo?.let { parseTech(it) },
+                        imdbId = (einfo?.optString("imdb_id") ?: e.optString("imdb_id")).takeIf { it.matches(Regex("tt[0-9]+")) },
+                        tmdbId = (einfo?.optString("tmdb_id") ?: e.optString("tmdb_id")).toLongOrNull()?.takeIf { it > 0 },
+                        tvdbId = (einfo?.optString("tvdb_id") ?: e.optString("tvdb_id")).toLongOrNull()?.takeIf { it > 0 }
                     )
                 }
             }
@@ -600,10 +607,13 @@ class OnDemandRepository @Inject constructor(
             releaseDate = (info.optString("releasedate").ifBlank { info.optString("releaseDate") }).takeIf { it.isNotBlank() },
             durationText = info.optString("duration").takeIf { it.isNotBlank() },
             episodes = episodes.sortedWith(compareBy({ it.season }, { it.episode })),
-            tech = parseTech(info)
+            tech = parseTech(info),
+            tmdbId = info.optString("tmdb_id").ifBlank { info.optString("tmdb") }.takeIf { it.toLongOrNull()?.let { id -> id > 0 } == true },
+            imdbId = info.optString("imdb_id").takeIf { it.matches(Regex("tt[0-9]+")) }
         )
-        infoCache[item.uid] = result
+        infoCache[cacheKey] = result
         result
+        }
     }
 
     // ------------------------------------------------------------------ poster cache
@@ -644,95 +654,54 @@ class OnDemandRepository @Inject constructor(
         val providerName: String = "",
         val ext: String? = null,
         val tech: VodTech? = null,
-        val episodeTag: String? = null
+        val episodeTag: String? = null,
+        val playlistId: String = ""
     )
 
-    /**
-     * Finds [title] in your providers' catalogs: by TMDB id when both sides have one, otherwise
-     * by name (and year when known). For series, [season]/[episode] pick the episode.
-     */
-    suspend fun sourcesFor(
-        type: String,
-        tmdbId: String?,
-        title: String,
-        year: Int?,
-        season: Int?,
-        episode: Int?
-    ): List<OnDemandSource> = withContext(Dispatchers.IO) {
-        val kind = when (type.lowercase()) {
-            "movie" -> VodKind.MOVIE
-            "series", "tv" -> VodKind.SERIES
-            else -> return@withContext emptyList()
+    /** Indexed title lookup; no catalogue import or broad scan is required to open an episode. */
+    internal suspend fun integratedSources(target: VodStreamTarget, playlistId: String): List<OnDemandSource> = withContext(Dispatchers.IO) {
+        val pl = playlist(playlistId)?.takeIf { it.enabled && it.isXtream && it.importVod } ?: return@withContext emptyList()
+        prefixMutex.withLock {
+            if (!prefixesReady) { db.loadPrefixes(); prefixesReady = true }
         }
-        if (!_hasContent.value) return@withContext emptyList()
-        val candidates = LinkedHashMap<String, VodItem>()
-        tmdbId?.let { id -> runCatching { db.byTmdb(kind, id) }.getOrDefault(emptyList()).forEach { candidates[it.uid] = it } }
-        if (title.isNotBlank()) {
-            runCatching { db.byTitle(kind, title) }.getOrDefault(emptyList())
-                .filter { year == null || it.year == null || kotlin.math.abs(it.year - year) <= 1 }
-                .forEach { candidates.putIfAbsent(it.uid, it) }
-        }
-        // Titles without an IMDb / TMDB match on either side (like "Big Brother UK 2023"):
-        // a looser match on the core title, with the year deciding between versions.
-        if (candidates.isEmpty() && title.isNotBlank()) {
-            val core = OnDemandDatabase.coreKey(title)
-            if (core.length >= 3) {
-                val loose = runCatching { db.search(kind, OnDemandDatabase.displayTitle(title), emptySet(), limit = 80) }
-                    .getOrDefault(emptyList())
-                    .filter { OnDemandDatabase.coreKey(it.name) == core }
-                val withYears = loose.map { it to (it.year ?: OnDemandDatabase.yearInTitle(it.name)) }
-                val picked = when {
-                    year == null -> withYears.map { it.first }
-                    withYears.any { it.second != null && kotlin.math.abs(it.second!! - year) <= 1 } ->
-                        withYears.filter { it.second != null && kotlin.math.abs(it.second!! - year) <= 1 }.map { it.first }
-                    else -> withYears.filter { it.second == null }.map { it.first }
-                }
-                picked.forEach { candidates.putIfAbsent(it.uid, it) }
-            }
-        }
-        // Titles in categories you hid (or that are locked) never show up in Nuvio.
+        val candidates = linkedMapOf<String, VodItem>()
+        target.tmdbId?.let { db.byTmdb(target.kind, it).forEach { item -> candidates[item.uid] = item } }
+        if (target.title.isNotBlank()) db.byTitle(target.kind, target.title).forEach { candidates.putIfAbsent(it.uid, it) }
         val user = prefs.userState.first()
         val settings = prefs.settings.first()
+        val headers = if (pl.userAgent.isBlank()) emptyMap() else mapOf("User-Agent" to pl.userAgent)
         val allowed = candidates.values.filter { item ->
-            val uid = "${item.kind.key}:${item.playlistId}:${item.categoryId}"
-            if (uid in user.vodHiddenCategories) return@filter false
-            val name = runCatching { db.categoryName(item.playlistId, item.kind, item.categoryId) }.getOrNull().orEmpty()
-            !com.nuvio.tv.livetv.parental.ParentalControls.isLocked("vod:$uid", name, settings, user.lockedGroups)
+            item.playlistId == playlistId && "${item.kind.key}:${item.playlistId}:${item.categoryId}" !in user.vodHiddenCategories &&
+                !com.nuvio.tv.livetv.parental.ParentalControls.isLocked("vod:${item.kind.key}:${item.playlistId}:${item.categoryId}",
+                    db.categoryName(item.playlistId, item.kind, item.categoryId).orEmpty(), settings, user.lockedGroups)
         }
-        val out = ArrayList<OnDemandSource>()
-        for (item in allowed.take(6)) {
-            val pl = playlist(item.playlistId) ?: continue
-            val headers = if (pl.userAgent.isNotBlank()) mapOf("User-Agent" to pl.userAgent) else emptyMap()
-            if (kind == VodKind.MOVIE) {
-                val url = movieUrl(item) ?: continue
-                val tech = runCatching { info(item)?.tech }.getOrNull()
-                out += OnDemandSource(
-                    "${pl.name} · ${(item.ext ?: "mp4").uppercase()}", url, headers,
-                    title = item.name, year = item.year, providerName = pl.name, ext = item.ext ?: "mp4", tech = tech
-                )
-            } else if (season != null && episode != null) {
-                val episodes = info(item)?.episodes.orEmpty()
-                // Exact season and episode; if the provider lists the show as a single season
-                // (common for daily shows), match the episode number alone.
-                val ep = episodes.firstOrNull { it.season == season && it.episode == episode }
-                    ?: episodes.takeIf { list -> list.map { it.season }.distinct().size == 1 }
-                        ?.firstOrNull { it.episode == episode }
-                    ?: continue
-                out += OnDemandSource(
-                    "${pl.name} · S${season}E${episode} · ${ep.ext.uppercase()}", ep.url, headers,
-                    title = item.name, year = item.year, providerName = pl.name, ext = ep.ext, tech = ep.tech,
-                    episodeTag = "S%02dE%02d".format(season, episode)
-                )
-            }
+        Log.d("IptvVod", "Catalogue lookup: candidates=${candidates.size} allowed=${allowed.size}")
+        kotlinx.coroutines.coroutineScope {
+            allowed.map { item -> async {
+                detailRequests.withPermit {
+                    // A catalog's matching TMDB id is sufficient for a movie link. Other cases
+                    // verify the detail response before trusting a title/year fallback.
+                    val detail = if (target.kind == VodKind.SERIES || !VodMatchPolicy.titleMatches(target, item)) info(item) else null
+                    if (!VodMatchPolicy.parentMatches(target, item, detail)) return@withPermit emptyList()
+                    val episodes = if (target.kind == VodKind.SERIES) VodMatchPolicy.episodes(target, detail?.episodes.orEmpty(), item.name) else emptyList()
+                    Log.d("IptvVod", "Catalogue detail: episodes=${detail?.episodes?.size ?: 0} matched=${episodes.size}")
+                    if (target.kind == VodKind.SERIES) episodes.map { episode ->
+                        OnDemandSource("${pl.name} · S${episode.season}E${episode.episode} · ${episode.ext.uppercase()}", episode.url, headers,
+                            item.name, item.year, pl.name, episode.ext, episode.tech,
+                            "S%02dE%02d".format(episode.season, episode.episode), pl.id)
+                    } else movieUrl(item)?.let { url -> listOf(OnDemandSource(
+                        "${pl.name} · ${(item.ext ?: "mp4").uppercase()}", url, headers,
+                        item.name, item.year, pl.name, item.ext ?: "mp4", detail?.tech, playlistId = pl.id)) }.orEmpty()
+                }
+            } }.let { kotlinx.coroutines.awaitAll(*it.toTypedArray()).flatten() }
         }
-        out
     }
 
     // ------------------------------------------------------------------ helpers
 
-    private fun getText(url: String, userAgent: String): String {
+    private fun getText(url: String, userAgent: String, client: OkHttpClient = http): String {
         val request = Request.Builder().url(url).header("User-Agent", userAgent.ifBlank { LiveTvRepository.DEFAULT_UA }).build()
-        http.newCall(request).execute().use { r ->
+        client.newCall(request).execute().use { r ->
             if (!r.isSuccessful) error("HTTP ${r.code}")
             return r.body?.string() ?: error("Empty response")
         }

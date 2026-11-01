@@ -109,7 +109,8 @@ class StreamScreenViewModel @Inject constructor(
     party: com.nuvio.tv.core.party.PartyRepository,
     profileManager: com.nuvio.tv.core.profile.ProfileManager,
     savedStateHandle: SavedStateHandle,
-    private val tvdbOrderStore: com.nuvio.tv.data.tvdb.TvdbOrderStore? = null
+    private val tvdbOrderStore: com.nuvio.tv.data.tvdb.TvdbOrderStore? = null,
+    private val iptvSources: com.nuvio.tv.livetv.ondemand.IptvStreamSources? = null
 ) : ViewModel() {
     private var autoPlayHandledForSession = false
     private var directAutoPlayModeInitializedForSession = false
@@ -565,7 +566,7 @@ class StreamScreenViewModel @Inject constructor(
             val installedAddons = if (isNativeServerRequest) {
                 emptyList()
             } else {
-                addonRepository.getInstalledAddons().first().enabledAddons()
+                (iptvSources?.sources() ?: addonRepository.getInstalledAddons()).first().enabledAddons()
             }
             val installedAddonOrder = installedAddons.map { it.displayName }
             val directDebridSourceNames = emptyList<String>()
@@ -635,7 +636,7 @@ class StreamScreenViewModel @Inject constructor(
                     } else null
                     // Try binge group + filename first
                     val bingeAndFilename = if (nextFilename != null) {
-                        allStreams.firstOrNull { stream ->
+                        StreamAutoPlaySelector.automaticStreams(allStreams, playerSettings, installedAddonOrder.toSet()).firstOrNull { stream ->
                             !stream.isExternal() &&
                                 stream.behaviorHints?.bingeGroup == persistedBingeGroup &&
                                 com.nuvio.tv.core.player.FilenameEpisodeMatcher.matches(
@@ -645,7 +646,7 @@ class StreamScreenViewModel @Inject constructor(
                     } else null
                     // Try binge group + infoHash when filename match failed or was unavailable
                     val bingeAndInfoHash = if (bingeAndFilename == null && persistedInfoHash != null) {
-                        allStreams.firstOrNull { stream ->
+                        StreamAutoPlaySelector.automaticStreams(allStreams, playerSettings, installedAddonOrder.toSet()).firstOrNull { stream ->
                             !stream.isExternal() &&
                                 stream.behaviorHints?.bingeGroup == persistedBingeGroup &&
                                 stream.infoHash?.equals(persistedInfoHash, ignoreCase = true) == true
@@ -653,6 +654,7 @@ class StreamScreenViewModel @Inject constructor(
                     } else null
                     // Fall back to binge group alone
                     bingeAndFilename ?: bingeAndInfoHash ?: StreamAutoPlaySelector.selectAutoPlayStream(
+                        sourceSettings = playerSettings,
                         streams = allStreams,
                         mode = playerSettings.streamAutoPlayMode,
                         regexPattern = playerSettings.streamAutoPlayRegex,
@@ -677,6 +679,7 @@ class StreamScreenViewModel @Inject constructor(
                     null
                 } else {
                     StreamAutoPlaySelector.selectAutoPlayStream(
+                        sourceSettings = playerSettings,
                         streams = allStreams,
                         mode = playerSettings.streamAutoPlayMode,
                         regexPattern = playerSettings.streamAutoPlayRegex,
@@ -829,7 +832,9 @@ class StreamScreenViewModel @Inject constructor(
                     videoId = videoId,
                     season = season,
                     episode = episode,
-                    forceRefresh = forceRefresh
+                    forceRefresh = forceRefresh,
+                    contentContext = com.nuvio.tv.domain.model.StreamContentContext(contentId ?: videoId,
+                        contentName ?: title, com.nuvio.tv.core.tracking.extractTrackingYear(year), episodeName, capturedTvdbContext)
                 ).collect { result ->
                     when (result) {
                         is NetworkResult.Success -> {
@@ -878,6 +883,7 @@ class StreamScreenViewModel @Inject constructor(
                                 )
                                 val allStreams = orderedStreams.flatMap { it.streams }
                                 val earlyMatch = StreamAutoPlaySelector.selectAutoPlayStream(
+                                    sourceSettings = playerSettings,
                                     streams = allStreams,
                                     mode = playerSettings.streamAutoPlayMode,
                                     regexPattern = playerSettings.streamAutoPlayRegex,

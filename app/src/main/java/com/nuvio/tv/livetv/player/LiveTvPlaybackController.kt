@@ -21,10 +21,12 @@ import com.nuvio.tv.livetv.data.LiveTvRepository
 import com.nuvio.tv.livetv.model.LiveChannel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -71,9 +73,12 @@ data class LiveTrackOption(
 @OptIn(UnstableApi::class)
 @Singleton
 class LiveTvPlaybackController @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val stalker: com.nuvio.tv.livetv.data.StalkerPortalClient,
+    private val preferences: com.nuvio.tv.livetv.data.LiveTvPreferences
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var portalLinkJob: Job? = null
 
     private var _player: ExoPlayer? = null
     val player: ExoPlayer? get() = _player
@@ -596,6 +601,33 @@ class LiveTvPlaybackController @Inject constructor(
         /** Catch-up: the real time the replay should start at (the show's start). */
         catchupStartMs: Long? = null
     ) {
+        portalLinkJob?.cancel()
+        portalLinkJob = null
+        if (overrideUrl == null && channel.url.startsWith("reseq-stalker://")) {
+            reconnectJob?.cancel()
+            stallJob?.cancel()
+            stallJob = null
+            stopReplayCache()
+            clearStarting()
+            resumeAfterBackground = null
+            if (_shiftStartedAt.value != null) stopShift()
+            _player?.stop()
+            currentChannel = channel
+            currentUrl = null
+            _state.value = LivePlaybackState(channelKey = channel.key, isBuffering = true)
+            portalLinkJob = scope.launch {
+                try {
+                    val source = preferences.playlists.first().singleOrNull { it.id == channel.sourceId && it.isStalker && it.liveEnabled }
+                        ?: error("This portal playlist is unavailable.")
+                    val link = stalker.resolve(source, channel.url)
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    portalLinkJob = null
+                    play(channel.copy(headers = channel.headers + link.headers), overrideUrl = link.url)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { _state.value = LivePlaybackState(channelKey = channel.key, error = "Could not open the portal channel. Check the account or try again.") }
+            }
+            return
+        }
         // Something chosen to play (back from the background through a launcher row, say):
         // that wins over picking up what was on before.
         resumeAfterBackground = null
@@ -798,6 +830,8 @@ class LiveTvPlaybackController @Inject constructor(
     }
 
     fun stop() {
+        portalLinkJob?.cancel()
+        portalLinkJob = null
         clearStarting()
         reconnectJob?.cancel()
         stopReplayCache()
@@ -1894,10 +1928,14 @@ class LiveTvPlaybackController @Inject constructor(
      * own player opens, so the two never hold the audio at the same time.
      */
     fun releaseNow() {
-        if (_player != null) release()
+        portalLinkJob?.cancel()
+        portalLinkJob = null
+        if (_player != null || currentChannel != null) release()
     }
 
     private fun release() {
+        portalLinkJob?.cancel()
+        portalLinkJob = null
         backgroundJob?.cancel()
         backgroundJob = null
         resumeAfterBackground = null

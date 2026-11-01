@@ -94,7 +94,7 @@ internal enum class LiveTvPage(val title: String, val subtitle: String, val tab:
     INTEGRATION("Live TV", "How Live TV shows up in the rest of Nuvio", "Integration")
 }
 
-private val LIVE_TABS = listOf(LiveTvPage.MAIN, LiveTvPage.GUIDE, LiveTvPage.PLAYBACK)
+private val LIVE_TABS = listOf(LiveTvPage.MAIN, LiveTvPage.GUIDE, LiveTvPage.PLAYBACK, LiveTvPage.ON_DEMAND, LiveTvPage.INTEGRATION)
 
 /** The row of tabs across the top of Live TV settings; moving onto one shows it. */
 @Composable
@@ -175,6 +175,7 @@ private val CLOCK_SIZES = listOf("small" to "Small", "medium" to "Medium", "larg
 
 private sealed interface LiveDialog {
     data object AddM3u : LiveDialog
+    data object AddStalker : LiveDialog
     data object AddXtream : LiveDialog
     data object AddEpg : LiveDialog
     data class PlaylistActions(val source: PlaylistSource) : LiveDialog
@@ -351,7 +352,7 @@ internal fun LiveTvSettingsContent(
                         val account = accounts[pl.id]
                         val expiring = pl.enabled && account?.expiringSoon() == true
                         SettingsActionRow(
-                            title = pl.name + if (pl.isXtream) " (Xtream)" else "",
+                            title = pl.name + if (pl.isStalker) " (Stalker)" else if (pl.isXtream) " (Xtream)" else "",
                             subtitle = when {
                                 pl.isXtream && pl.enabled && !pl.importLive && pl.importVod -> "Movies & series only (TV channels off)"
                                 pl.isXtream && pl.enabled && !pl.importLive && !pl.importVod -> "Nothing included: turn on TV channels or movies & series under Edit"
@@ -374,6 +375,11 @@ internal fun LiveTvSettingsContent(
                         subtitle = "A channel list from the M3U link your provider gave you",
                         leadingIcon = Icons.Default.Add,
                         onClick = { dialog = LiveDialog.AddM3u }
+                    )
+                    SettingsActionRow(
+                        title = "Add Stalker / Ministra Portal",
+                        subtitle = "Use your provider's portal URL and authorised MAC address.",
+                        onClick = { dialog = LiveDialog.AddStalker }
                     )
                     SettingsActionRow(
                         title = "Add Xtream Codes Login",
@@ -1256,7 +1262,6 @@ internal fun LiveTvSettingsContent(
 
             // ------------------------------------------------------------ Search & Streams
             if (show(LiveTvPage.INTEGRATION)) item(key = "search_streams") {
-                var pickingStreamsPosition by remember { mutableStateOf(false) }
                 LiveSection(
                     title = "Search & Streams",
                     summary = "Search order · On Demand in streams",
@@ -1322,25 +1327,9 @@ internal fun LiveTvSettingsContent(
                         s.onDemandInStreams,
                         { update { it.copy(onDemandInStreams = !it.onDemandInStreams) } }
                     )
-                    SettingsActionRow(
-                        title = "On Demand Tab Position",
-                        subtitle = "Where its tab goes in the stream list, left to right after All",
-                        value = streamsPositionLabel(s.onDemandStreamsPosition),
-                        onClick = { pickingStreamsPosition = true }
-                    )
-                    SettingsToggleRow(
-                        "Let Auto-Play Pick On Demand",
-                        "Only when its tab is first (and auto-play is set to use all sources)",
-                        s.onDemandAutoPlay,
-                        { update { it.copy(onDemandAutoPlay = !it.onDemandAutoPlay) } }
-                    )
-                    if (pickingStreamsPosition) SettingsSingleChoiceDialog(
-                        title = "On Demand tab position",
-                        options = listOf("FIRST", "AFTER_FIRST", "LAST").map { SettingsPickerOption(it, streamsPositionLabel(it)) },
-                        selectedValue = s.onDemandStreamsPosition,
-                        onOptionSelected = { v -> update { it.copy(onDemandStreamsPosition = v) }; pickingStreamsPosition = false },
-                        onDismiss = { pickingStreamsPosition = false }
-                    )
+                    Text("Move each IPTV playlist independently in Addons. Autoplay source choices are in Settings → Playback.",
+                        style = MaterialTheme.typography.bodySmall, color = NuvioTheme.colors.TextSecondary)
+
                 }
             }
 
@@ -1545,6 +1534,15 @@ internal fun LiveTvSettingsContent(
             onDismiss = close,
             onSave = { v, _ -> if (v[1].isNotBlank()) viewModel.addPlaylist(v[0], v[1], v[2]); close() }
         )
+        LiveDialog.AddStalker -> SourceFormDialog(
+            title = "Add Stalker / Ministra portal",
+            validate = { com.nuvio.tv.livetv.data.StalkerPortalClient.validate(it[1], it[2]) },
+            fields = listOf(FormField("Name", "My provider"), FormField("Portal URL", "http://host/stalker_portal/c/"),
+                FormField("MAC address", "00:1A:79:00:00:00"), FormField("Username (if required)", ""),
+                FormField("Password (if required)", ""), FormField("Serial number (if required)", "")),
+            onDismiss = close,
+            onSave = { v, _ -> if (v[1].isNotBlank() && v[2].isNotBlank()) viewModel.addStalker(v[0], v[1], v[2], v[3], v[4], v[5]); close() }
+        )
         LiveDialog.AddXtream -> SourceFormDialog(
             title = "Add Xtream Codes login",
             fields = listOf(
@@ -1605,7 +1603,19 @@ internal fun LiveTvSettingsContent(
         )
         is LiveDialog.EditPlaylist -> {
             val src = d.source
-            if (src.isXtream) {
+            if (src.isStalker) {
+                SourceFormDialog(
+                    title = "Edit Stalker / Ministra portal",
+                    validate = { com.nuvio.tv.livetv.data.StalkerPortalClient.validate(it[1], it[2]) },
+                    fields = listOf(FormField("Name", "", src.name), FormField("Portal URL", "", src.stalkerPortal),
+                        FormField("MAC address", "", src.stalkerMac), FormField("Username (if required)", "", src.stalkerUsername),
+                        FormField("Password (if required)", "", src.stalkerPassword), FormField("Serial number (if required)", "", src.stalkerSerial)),
+                    toggle = "Load built-in guide" to src.useEmbeddedEpg,
+                    onDismiss = close,
+                    onSave = { v, t -> viewModel.savePlaylist(src.copy(name = v[0], stalkerPortal = v[1].trim(),
+                        stalkerMac = v[2].trim().uppercase(), stalkerUsername = v[3], stalkerPassword = v[4], stalkerSerial = v[5], useEmbeddedEpg = t)); close() }
+                )
+            } else if (src.isXtream) {
                 SourceFormDialog(
                     title = "Edit Xtream login",
                     fields = listOf(
@@ -1973,6 +1983,7 @@ private fun SourceFormDialog(
     fields: List<FormField>,
     onDismiss: () -> Unit,
     onSave: (List<String>, Boolean) -> Unit,
+    validate: ((List<String>) -> String?)? = null,
     toggle: Pair<String, Boolean>? = null,
     /** A second switch (Xtream: import movies & series); its value goes to [onSaveBoth]. */
     toggle2: Pair<String, Boolean>? = null,
@@ -1982,6 +1993,7 @@ private fun SourceFormDialog(
     onSaveAll: ((values: List<String>, guide: Boolean, vod: Boolean, live: Boolean) -> Unit)? = null
 ) {
     val values = remember { fields.map { mutableStateOf(it.initial) } }
+    var validationError by remember { mutableStateOf<String?>(null) }
     var toggleValue by remember { mutableStateOf(toggle?.second ?: true) }
     var toggle2Value by remember { mutableStateOf(toggle2?.second ?: true) }
     var toggleLiveValue by remember { mutableStateOf(toggleLive?.second ?: true) }
@@ -2012,6 +2024,7 @@ private fun SourceFormDialog(
                     onValueChange = { values[i].value = it },
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = field.hint,
+                    isPassword = field.label.startsWith("Password", true),
                     focusRequester = if (i == 0) firstField else null
                 )
             }
@@ -2042,13 +2055,15 @@ private fun SourceFormDialog(
             )
         }
         }
+        validationError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = NuvioTheme.colors.TextSecondary) }
         SettingsDialogActionRow {
             SettingsDialogActionButton(text = "Cancel", onClick = onDismiss)
             SettingsDialogActionButton(
                 text = "Save",
                 onClick = {
                     val v = values.map { it.value.trim() }
-                    when {
+                    validationError = validate?.invoke(v)
+                    if (validationError == null) when {
                         onSaveAll != null -> onSaveAll(v, toggleValue, toggle2Value, toggleLiveValue)
                         onSaveBoth != null -> onSaveBoth(v, toggleValue, toggle2Value)
                         else -> onSave(v, toggleValue)
@@ -2240,11 +2255,6 @@ private fun SubHeading(text: String) {
     )
 }
 
-private fun streamsPositionLabel(v: String): String = when (v) {
-    "FIRST" -> "First"
-    "AFTER_FIRST" -> "After the first addon"
-    else -> "Last"
-}
 
 private fun searchSectionLabel(kind: String): String = when (kind) {
     "live" -> "Live TV channels"

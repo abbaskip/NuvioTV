@@ -56,7 +56,8 @@ data class LiveTvStatus(
 class LiveTvRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val prefs: LiveTvPreferences,
-    private val guideDb: EpgDatabase
+    private val guideDb: EpgDatabase,
+    private val stalker: StalkerPortalClient
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -166,6 +167,15 @@ class LiveTvRepository @Inject constructor(
         prefs.updatePlaylists { it + PlaylistSource(id = id, name = name.ifBlank { "Playlist" }, url = url.trim(), userAgent = userAgent.trim()) }
         scope.launch { refreshInternal(forcePlaylists = false, forceEpg = false, forceIds = setOf(id)) }
         return id
+    }
+
+    suspend fun addStalker(name: String, portal: String, mac: String, user: String, pass: String, serial: String) {
+        val source = PlaylistSource(UUID.randomUUID().toString(), name.ifBlank { "Stalker" }, "",
+            stalkerPortal = portal.trim(), stalkerMac = mac.trim().uppercase(),
+            stalkerUsername = user.trim(), stalkerPassword = pass, stalkerSerial = serial.trim())
+        StalkerPortalClient.endpoint(source.stalkerPortal)
+        prefs.updatePlaylists { it + source }
+        scope.launch { refreshInternal(forcePlaylists = false, forceEpg = false, forceIds = setOf(source.id)) }
     }
 
     suspend fun addXtream(
@@ -550,9 +560,9 @@ class LiveTvRepository @Inject constructor(
                 setStatus(loading = true, message = "Updating playlist \"${pl.name}\"…")
                 val before = if (file.exists()) file.length() to file.lastModified() else null
                 val result = runCatching {
-                    if (pl.isXtream) {
+                    if (pl.isXtream || pl.isStalker) {
                         val old = if (file.exists()) File(file.parentFile, file.name + ".prev").also { file.copyTo(it, overwrite = true) } else null
-                        downloadXtream(pl, file)
+                        if (pl.isStalker) stalker.writePlaylist(pl, file) else downloadXtream(pl, file)
                         // Xtream lists are rebuilt each time: unchanged if identical to before.
                         val unchanged = old != null && sameDecoded(old, file)
                         old?.delete()
@@ -562,7 +572,7 @@ class LiveTvRepository @Inject constructor(
                     } else download(pl.resolvedUrl(), file, pl.userAgent, progressLabel = "Downloading playlist \"${pl.name}\"")
                 }
                 // M3U links from Xtream providers (get.php with a login): the account's details.
-                if (!pl.isXtream) refreshM3uAccount(pl)
+                if (!pl.isXtream && !pl.isStalker) refreshM3uAccount(pl)
                 val err = result.exceptionOrNull()?.let { e ->
                     when (e) {
                         is java.net.UnknownHostException -> "Couldn't find the provider's server (${e.message?.substringAfter("\"")?.substringBefore("\"") ?: "address"}). Check the address, your internet, or try again later."
@@ -605,7 +615,12 @@ class LiveTvRepository @Inject constructor(
                 setStatus(loading = true, message = "Downloading guide \"${target.name}\"…")
                 LIVE_REPORT.add("Downloading guide \"${target.name}\" (user agent: ${target.userAgent.ifBlank { "app default" }})")
                 val result = runCatching {
-                    download(
+                    if (target.url.startsWith("reseq-stalker-epg://")) {
+                        val source = playlists.single { it.id == target.playlistId && it.isStalker }
+                        stalker.writeGuide(source, file)
+                        markChanged(file)
+                        true
+                    } else download(
                         target.url, file, target.userAgent,
                         progressLabel = "Downloading guide \"${target.name}\"",
                         // Also whole when the guide has gone stale: a provider that keeps answering
@@ -1612,6 +1627,7 @@ class LiveTvRepository @Inject constructor(
         val playlists = prefs.currentPlaylists().filter { it.liveEnabled && it.useEmbeddedEpg }
         for (pl in playlists) {
             val urls = mutableListOf<String>()
+            if (pl.isStalker) urls += "reseq-stalker-epg://${pl.id}"
             pl.xtreamEpgUrl()?.let { urls += it }
             urls += embeddedEpgUrls[pl.id].orEmpty()
             urls.distinct().forEach { url ->

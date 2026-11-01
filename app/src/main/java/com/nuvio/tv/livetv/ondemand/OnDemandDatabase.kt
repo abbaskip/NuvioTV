@@ -597,8 +597,12 @@ class OnDemandDatabase @Inject constructor(@ApplicationContext private val appCo
     fun byTmdb(kind: VodKind, tmdbId: String): List<VodItem> =
         query("SELECT * FROM items WHERE kind = ? AND tmdb = ?", arrayListOf(kind.key, tmdbId))
 
-    fun byTitle(kind: VodKind, title: String): List<VodItem> =
-        query("SELECT * FROM items WHERE kind = ? AND norm = ?", arrayListOf(kind.key, normalize(title)))
+    fun byTitle(kind: VodKind, title: String): List<VodItem> {
+        val keys = titleLookupKeys(title)
+        if (keys.isEmpty()) return emptyList()
+        return query("SELECT * FROM items WHERE kind = ? AND norm IN (${keys.joinToString { "?" }})",
+            arrayListOf(kind.key).apply { addAll(keys) })
+    }
 
     fun item(playlistId: String, kind: VodKind, id: String): VodItem? =
         query("SELECT * FROM items WHERE pl = ? AND kind = ? AND id = ?", arrayListOf(playlistId, kind.key, id)).firstOrNull()
@@ -631,6 +635,10 @@ class OnDemandDatabase @Inject constructor(@ApplicationContext private val appCo
     companion object {
         /** Lower case, letters and digits only, with years and quality tags taken out. */
         fun normalize(s: String): String = normalizeWords(s).joinToString("")
+
+        // Match the same decoration cleanup used by the final title/year identity check.
+        internal fun titleLookupKeys(title: String): List<String> =
+            listOf(normalize(title), normalize(displayTitle(title))).filter { it.isNotBlank() }.distinct()
 
         private val PREFIX = Regex("""^(\[[^\]]*\]|\|[^|]*\||[A-Z]{2,4}\s*[-|:]\s+)+""")
         // Built once: building a pattern is slow, and these run for every title on screen.

@@ -1,8 +1,6 @@
 package com.nuvio.tv.livetv.ondemand
 
 import android.content.Context
-import com.nuvio.tv.core.network.NetworkResult
-import com.nuvio.tv.core.tmdb.TmdbService
 import com.nuvio.tv.domain.model.AddonStreams
 import com.nuvio.tv.domain.model.ProxyHeaders
 import com.nuvio.tv.domain.model.Stream
@@ -11,145 +9,31 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface OnDemandEntryPoint {
     fun onDemandRepository(): OnDemandRepository
-    fun tmdbService(): TmdbService
-    fun liveTvPreferences(): com.nuvio.tv.livetv.data.LiveTvPreferences
 }
 
 fun onDemandRepository(context: Context): OnDemandRepository =
     EntryPointAccessors.fromApplication(context.applicationContext, OnDemandEntryPoint::class.java).onDemandRepository()
 
-/**
- * Adds a "Watch On Demand" group to the streams Nuvio finds for a movie or episode, when one of
- * your IPTV providers has it. It shows up next to your addon and debrid streams.
- */
+/** Stream presentation shared by the integrated playlist sources and On Demand browser. */
 object OnDemandStreams {
-    /** The label for the provider's copies in Nuvio's stream list. */
     const val GROUP_NAME = "📡 On Demand"
 
-    /** Binge group for every provider copy: the next episode is picked from your provider too. */
-    const val BINGE_GROUP = "nuvio-iptv-on-demand"
-
-    /**
-     * True while provider movies/series are imported and offered in Nuvio's stream list. Nuvio
-     * greys out Play ("Playback unavailable") when none of your addons can stream a title (for
-     * example shows without an IMDb id); with On Demand on, your provider may still have it.
-     */
-    @Volatile
-    var offeredInStreams: Boolean = false
-
-    /** Auto-play may pick your provider's copy (set on, and its tab is first). */
-    @Volatile
-    var autoPlayAllowed: Boolean = false
-
-    /** Where the On Demand tab goes ("FIRST", "AFTER_FIRST" or "LAST"), kept up to date from settings. */
-    @Volatile
-    var tabPosition: String = "LAST"
-
-    /** Puts the On Demand tab in its place, after Nuvio has ordered the addon tabs. */
-    fun placeTab(ordered: List<AddonStreams>, mine: AddonStreams): List<AddonStreams> = place(ordered, mine, tabPosition)
-
-    /** Puts the On Demand group where it's set to go: first, after the first addon, or last. */
-    private fun place(groups: List<AddonStreams>, mine: AddonStreams, position: String): List<AddonStreams> = when (position) {
-        "FIRST" -> listOf(mine) + groups
-        "AFTER_FIRST" -> groups.take(1) + mine + groups.drop(1)
-        else -> groups + mine
-    }
-
-    fun withOnDemand(
-        context: Context,
-        source: Flow<NetworkResult<List<AddonStreams>>>,
-        type: String,
-        videoId: String,
-        season: Int?,
-        episode: Int?,
-        title: String,
-        year: String?
-    ): Flow<NetworkResult<List<AddonStreams>>> {
-        val entry = runCatching {
-            EntryPointAccessors.fromApplication(context.applicationContext, OnDemandEntryPoint::class.java)
-        }.getOrNull() ?: return source
-        // Your provider's copies, and where they go in the list (their tab, left to right): set
-        // in Live TV settings, last by default.
-        val onDemand = flow {
-            emit(emptyList<Stream>() to "LAST")
-            val position = runCatching { entry.liveTvPreferences().settings.first().onDemandStreamsPosition }.getOrDefault("LAST")
-            val found = runCatching { lookup(entry, type, videoId, season, episode, title, year) }.getOrDefault(emptyList())
-            if (found.isNotEmpty()) emit(found to position)
-        }
-        return combine(source, onDemand) { result, (extra, position) ->
-            when {
-                extra.isEmpty() -> result
-                result is NetworkResult.Success -> NetworkResult.Success(place(result.data, AddonStreams(GROUP_NAME, null, extra), position))
-                // No addon found anything (or they failed): your provider's copy is still offered,
-                // instead of "playback unavailable".
-                result is NetworkResult.Error -> NetworkResult.Success(listOf(AddonStreams(GROUP_NAME, null, extra)))
-                else -> result
-            }
-        }
-    }
-
-    private suspend fun lookup(
-        entry: OnDemandEntryPoint,
-        type: String,
-        videoId: String,
-        season: Int?,
-        episode: Int?,
-        title: String,
-        year: String?
-    ): List<Stream> {
-        val show = runCatching { entry.liveTvPreferences().settings.first().onDemandInStreams }.getOrDefault(true)
-        if (!show) return emptyList()
-        val repo = entry.onDemandRepository()
-        repo.start()
-        if (!repo.hasContent.value) return emptyList()
-        val base = videoId.substringBefore(':')
-        val tmdbId = when {
-            base.startsWith("tmdb", ignoreCase = true) -> videoId.substringAfter("tmdb:").substringBefore(':').takeIf { it.all(Char::isDigit) }
-            base.startsWith("tt") -> runCatching {
-                entry.tmdbService().imdbToTmdb(base, if (type.equals("movie", true)) "movie" else "tv")?.toString()
-            }.getOrNull()
-            else -> null
-        }
-        val sources = repo.sourcesFor(type, tmdbId, title, year?.take(4)?.toIntOrNull(), season, episode)
-        return sources.map { s ->
-            val t = s.tech
-            val quality = t?.quality
-            Stream(
-                name = listOfNotNull(GROUP_NAME, quality).joinToString("\n"),
-                title = s.label,
-                description = describe(s),
-                url = s.url,
-                ytId = null,
-                infoHash = null,
-                fileIdx = null,
-                externalUrl = null,
-                behaviorHints = StreamBehaviorHints(
-                    notWebReady = if (s.headers.isEmpty()) null else true,
-                    // The same for every episode from your provider: Nuvio's "next episode from the
-                    // same source" then carries on with your provider's copy automatically.
-                    bingeGroup = BINGE_GROUP,
-                    countryWhitelist = null,
-                    proxyHeaders = if (s.headers.isEmpty()) null else ProxyHeaders(request = s.headers, response = null),
-                    videoSize = t?.estimatedBytes,
-                    // A release-style name, so Nuvio's own badge rules (4K, HEVC, HDR, 5.1…)
-                    // recognise the stream the same way they do addon streams.
-                    filename = releaseName(s)
-                ),
-                addonName = GROUP_NAME,
-                addonLogo = null,
-                quality = quality,
-                qualityValue = t?.height ?: -1
-            )
-        }
+    internal fun stream(s: OnDemandRepository.OnDemandSource, sourceName: String): Stream {
+        val t = s.tech
+        val quality = t?.quality
+        return Stream(name = listOfNotNull(sourceName, quality).joinToString("\n"), title = s.label,
+            description = describe(s), url = s.url, ytId = null, infoHash = null, fileIdx = null, externalUrl = null,
+            behaviorHints = StreamBehaviorHints(notWebReady = if (s.headers.isEmpty()) null else true,
+                bingeGroup = "iptv-playlist:${s.playlistId}", countryWhitelist = null,
+                proxyHeaders = if (s.headers.isEmpty()) null else ProxyHeaders(request = s.headers, response = null),
+                videoSize = t?.estimatedBytes, filename = releaseName(s)),
+            addonName = sourceName, addonLogo = null, quality = quality, qualityValue = t?.height ?: -1,
+            iptvPlaylistId = s.playlistId)
     }
 
     /**

@@ -55,6 +55,7 @@ class PlayerViewModel @Inject constructor(
     private val metaRepository: MetaRepository,
     private val streamRepository: StreamRepository,
     private val addonRepository: AddonRepository,
+    private val iptvSources: com.nuvio.tv.livetv.ondemand.IptvStreamSources,
     private val pluginManager: PluginManager,
     private val subtitleRepository: com.nuvio.tv.domain.repository.SubtitleRepository,
     private val parentalGuideRepository: ParentalGuideRepository,
@@ -153,7 +154,8 @@ class PlayerViewModel @Inject constructor(
         profileId = savedStateHandle.get<String>("profileId")?.toIntOrNull()
             ?: profileManager.activeProfileId.value,
         savedStateHandle = savedStateHandle,
-        scope = viewModelScope
+        scope = viewModelScope,
+        iptvSources = iptvSources
     )
 
     init {

@@ -109,18 +109,15 @@ internal fun PlaybackStreamSelectionSection(
     }
 
     if (settings.streamAutoPlayMode != StreamAutoPlayMode.MANUAL) {
-        SettingsActionRow(
-            title = stringResource(R.string.autoplay_scope),
-            subtitle = null,
-            value = when (effectiveAutoPlaySource) {
-                StreamAutoPlaySource.ALL_SOURCES -> stringResource(R.string.autoplay_scope_all)
-                StreamAutoPlaySource.INSTALLED_ADDONS_ONLY -> stringResource(R.string.autoplay_scope_addons)
-                StreamAutoPlaySource.ENABLED_PLUGINS_ONLY -> stringResource(R.string.autoplay_scope_plugins)
-            },
-            onClick = { onOpenDialog(PlaybackDialog.STREAM_AUTO_PLAY_SOURCE) }
-        )
+        val allowAddons = settings.streamAutoPlayAddonsEnabled ?: (effectiveAutoPlaySource != StreamAutoPlaySource.ENABLED_PLUGINS_ONLY)
+        val allowPlugins = settings.streamAutoPlayPluginsEnabled ?: (effectiveAutoPlaySource != StreamAutoPlaySource.INSTALLED_ADDONS_ONLY)
+        SettingsToggleRow("Autoplay from Addons", null, allowAddons, { onUpdate { setStreamAutoPlayAddonsEnabled(!allowAddons) } })
+        if (AppFeaturePolicy.pluginsEnabled) SettingsToggleRow("Autoplay from Plugins", null, allowPlugins,
+            { onUpdate { setStreamAutoPlayPluginsEnabled(!allowPlugins) } })
+        SettingsToggleRow("Autoplay from IPTV Playlists", "Uses enabled playlist sources in your addon/source order", settings.streamAutoPlayPlaylistsEnabled,
+            { onUpdate { setStreamAutoPlayPlaylistsEnabled(!settings.streamAutoPlayPlaylistsEnabled) } })
 
-        if (effectiveAutoPlaySource != StreamAutoPlaySource.ENABLED_PLUGINS_ONLY) {
+        if (allowAddons) {
             SettingsActionRow(
                 title = stringResource(R.string.autoplay_allowed_addons),
                 subtitle = null,
@@ -134,7 +131,7 @@ internal fun PlaybackStreamSelectionSection(
 
         if (
             AppFeaturePolicy.pluginsEnabled &&
-            effectiveAutoPlaySource != StreamAutoPlaySource.INSTALLED_ADDONS_ONLY
+            allowPlugins
         ) {
             SettingsActionRow(
                 title = stringResource(R.string.autoplay_allowed_plugins),

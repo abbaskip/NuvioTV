@@ -5,6 +5,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DriveBackupPayloadTest {
+    @Test(expected = IllegalArgumentException::class) fun streamSourceSectionsRequireTheKnownVersion() {
+        driveBackupData(JSONObject("""{"format":1,"data":{"reseq_sources_version":{"t":"i","v":2}}}"""))
+    }
+    @Test(expected = IllegalArgumentException::class) fun streamSourcePreferencesCannotBecomeOrphanedProfiles() {
+        driveBackupData(JSONObject("""{"format":1,"data":{"reseq_sources_version":{"t":"i","v":1},"reseq_sources:7:order":{"t":"str","v":"[]"}}}"""))
+    }
     @Test fun validSettingsRemainTyped() {
         val data = driveBackupData(JSONObject("""{"format":1,"data":{"flag":{"t":"b","v":true},"favorites":{"t":"s","v":["a"]},"count":{"t":"l","v":100}}}"""))
         assertTrue(data.getJSONObject("flag").getBoolean("v"))

@@ -358,6 +358,7 @@ private fun appLicenseItem() = LicenseAttributionItem(
 
 @Composable
 private fun dataAttributionItems() = listOf(
+    LicenseAttributionItem(title = "IPTVnator", body = "Stalker/MAG protocol adaptations from IPTVnator by 4gray and contributors (MIT). Independent project; no endorsement implied.", url = "https://github.com/4gray/iptvnator"),
     LicenseAttributionItem(
         title = "Nuvio Mobile Enhanced",
         body = "Personal-rating API behaviour adapted under GPL-3.0, using Nuvio's existing tracker clients. Independent projects; no endorsement implied.",

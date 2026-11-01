@@ -87,6 +87,7 @@ class DirectDebridStreamPreparer @Inject constructor(
 
         val prioritized = mutableListOf<Stream>()
         val autoPlaySelection = StreamAutoPlaySelector.selectAutoPlayStream(
+            sourceSettings = playerSettings,
             streams = streams,
             mode = playerSettings.streamAutoPlayMode,
             regexPattern = playerSettings.streamAutoPlayRegex,

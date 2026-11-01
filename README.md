@@ -47,13 +47,23 @@ Optional Gemini assistance uses **your own key**, entered in Settings. It is not
 
 ## Configuration backup and personal ratings
 
-The development build adds **Google Drive backup and sync** in **Settings → Backup & Sync** on the primary profile. Connect Google Drive on each TV using the on-screen code. Manual backup/restore and debounced automatic sync carry playlists and connection settings, guide mappings, channel customisations, Sports Hub preferences and each profile's non-default TVDB order IDs and per-series Shuffle choices (enabled/off and All episodes/Unwatched episodes). The global Shuffle availability switch continues using Nuvio's existing settings/cloud sync. Temporarily unavailable orders are retained. Use matching Nuvio profile IDs and names on both devices; restore stops rather than assigning one person's choices to another profile.
+The development build adds **Google Drive backup and sync** in **Settings → Backup & Sync** on the primary profile. Connect Google Drive on each TV using the on-screen code. Manual backup/restore and debounced automatic sync carry playlists and connection settings, guide mappings, channel customisations, Sports Hub preferences and each profile's mixed addon/playlist source ordering, disabled playlist sources, non-default TVDB order IDs and per-series Shuffle choices (enabled/off and All episodes/Unwatched episodes). The global Shuffle availability switch continues using Nuvio's existing settings/cloud sync. Temporarily unavailable orders are retained. Use matching Nuvio profile IDs and names on both devices; restore stops rather than assigning one person's choices to another profile.
 
 The backup includes private playlist credentials. ReSeq never shares it; don't share the file yourself. Personal TVDB/Gemini keys, tracker sessions, learned episode mappings and playback caches are not copied. Conflicting changes stop sync and are reported rather than silently overwriting settings. Automatic checks run while ReSeq is open, not as an always-running background service. Explicit Restore uses the saved configuration, so review the confirmation first.
 
 **Rate** on movie and series details reads your personal ratings and submits changes to all eligible signed-in Trakt, Simkl and MDBList accounts, independently of your Continue Watching source. Half-star choices map to their 1–10 scales. Each service confirms its own result; failures are reported separately. Removing a rating uses the rating-removal API, not history deletion. Simkl itself may add a newly rated title to a watching/completed list according to its API rules.
 
 An optional **Prompt to rate after watching** setting is off by default. It prompts after returning from a movie that reached playback completion, not after episodes or early stops. Rating controls require a supported title identity and a compatible connected tracker.
+
+## IPTV sources in this development build
+
+Xtream playlists with movies and series enabled appear **individually in Addons**, alongside your existing addons. Move each playlist up or down independently; its switch controls stream-list availability without removing the playlist, guide or On Demand browser. Autoplay has separate Addons, Plugins and IPTV Playlists switches under **Settings → Playback**. IPTV autoplay starts off.
+
+For normal addon searches, the selected TVDB order still determines the requested SxxEyy. IPTV catalogue matching instead uses the selected episode's identity and metadata, so a differently numbered provider copy can be offered. Conflicting identifiers, remakes, generic episode names and ambiguous matches are left unresolved rather than substituted by episode number. The separate On Demand browser remains available for unmatched content. Existing playback, resume and tracker paths are reused.
+
+**Stalker / Ministra** connections can be added under **Settings → IPTV** using a provider-authorised portal URL and MAC address, with optional login and serial fields when required. Live channels, categories and the built-in guide use the existing Live TV and Sports Hub paths. Playback links are requested when needed; portal session tokens stay in memory. This initial implementation covers live TV and EPG, not portal VOD or portal-specific archive APIs. Protocol behaviour is tested against simulated portals; a real Stalker subscription has not been tested. Some providers require additional device identity fields not covered by the basic MAG profile.
+
+The Stalker protocol implementation incorporates adaptations from [IPTVnator](https://github.com/4gray/iptvnator); its [MIT notice is retained](NOTICE-IPTVNATOR.md).
 
 ## Install and update
 

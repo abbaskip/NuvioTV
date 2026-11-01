@@ -8,6 +8,21 @@ import com.nuvio.tv.domain.model.Stream
 import com.nuvio.tv.domain.model.StreamDebridCacheState
 
 object StreamAutoPlaySelector {
+    /** Explicit source-kind switches also constrain binge matching, without hiding manual choices. */
+    fun automaticStreams(streams: List<Stream>, settings: com.nuvio.tv.data.local.PlayerSettings?, installedAddonNames: Set<String>): List<Stream> {
+        val explicit = settings?.streamAutoPlayAddonsEnabled != null || settings?.streamAutoPlayPluginsEnabled != null
+        return streams.filter { stream ->
+            when {
+                stream.iptvPlaylistId != null -> settings?.streamAutoPlayPlaylistsEnabled == true
+                !explicit -> true
+                stream.serverTarget != null || stream.addonName in installedAddonNames -> settings?.streamAutoPlayAddonsEnabled
+                    ?: (settings?.streamAutoPlaySource != StreamAutoPlaySource.ENABLED_PLUGINS_ONLY)
+                else -> AppFeaturePolicy.pluginsEnabled && (settings?.streamAutoPlayPluginsEnabled
+                    ?: (settings?.streamAutoPlaySource != StreamAutoPlaySource.INSTALLED_ADDONS_ONLY))
+            }
+        }
+    }
+
     fun orderAddonStreams(
         streams: List<AddonStreams>,
         installedOrder: List<String>,
@@ -67,24 +82,27 @@ object StreamAutoPlaySelector {
         selectedPlugins: Set<String>,
         preferredBingeGroup: String? = null,
         preferBingeGroupInSelection: Boolean = false,
-        bingeGroupOnly: Boolean = false
+        bingeGroupOnly: Boolean = false,
+        sourceSettings: com.nuvio.tv.data.local.PlayerSettings? = null
     ): Stream? {
         if (streams.isEmpty()) return null
 
-        val effectiveSource = if (!AppFeaturePolicy.pluginsEnabled && source == StreamAutoPlaySource.ENABLED_PLUGINS_ONLY) {
+        val allowedStreams = automaticStreams(streams, sourceSettings, installedAddonNames)
+        val explicitSources = sourceSettings?.streamAutoPlayAddonsEnabled != null || sourceSettings?.streamAutoPlayPluginsEnabled != null
+        val effectiveSource = if (explicitSources) StreamAutoPlaySource.ALL_SOURCES else if (!AppFeaturePolicy.pluginsEnabled && source == StreamAutoPlaySource.ENABLED_PLUGINS_ONLY) {
             StreamAutoPlaySource.INSTALLED_ADDONS_ONLY
         } else {
             source
         }
 
         val sourceScopedStreams = when (effectiveSource) {
-            StreamAutoPlaySource.ALL_SOURCES -> streams
-            StreamAutoPlaySource.INSTALLED_ADDONS_ONLY -> streams.filter { it.serverTarget != null || it.addonName in installedAddonNames }
-            StreamAutoPlaySource.ENABLED_PLUGINS_ONLY -> streams.filter { it.addonName !in installedAddonNames }
+            StreamAutoPlaySource.ALL_SOURCES -> allowedStreams
+            StreamAutoPlaySource.INSTALLED_ADDONS_ONLY -> allowedStreams.filter { it.iptvPlaylistId != null || it.serverTarget != null || it.addonName in installedAddonNames }
+            StreamAutoPlaySource.ENABLED_PLUGINS_ONLY -> allowedStreams.filter { it.iptvPlaylistId != null || it.addonName !in installedAddonNames }
         }
         val candidateStreams = sourceScopedStreams.filter { stream ->
             val isAddonStream = stream.addonName in installedAddonNames
-            if (stream.serverTarget != null) {
+            if (stream.iptvPlaylistId != null || stream.serverTarget != null) {
                 true
             } else if (isAddonStream) {
                 selectedAddons.isEmpty() || stream.addonName in selectedAddons
@@ -100,7 +118,7 @@ object StreamAutoPlaySelector {
         // not be limited by autoplay source/addon selection filters.
         val targetBingeGroup = preferredBingeGroup?.trim().orEmpty()
         if (preferBingeGroupInSelection && targetBingeGroup.isNotEmpty()) {
-            val bingeGroupMatch = streams.firstOrNull { stream ->
+            val bingeGroupMatch = allowedStreams.firstOrNull { stream ->
                 !stream.isExternal() &&
                     stream.behaviorHints?.bingeGroup == targetBingeGroup &&
                     isPlayable(stream)

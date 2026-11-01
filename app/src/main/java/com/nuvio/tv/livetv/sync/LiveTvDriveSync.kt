@@ -70,7 +70,8 @@ class LiveTvDriveSync @Inject constructor(
     private val repository: dagger.Lazy<LiveTvRepository>,
     private val orders: com.nuvio.tv.data.tvdb.TvdbOrderStore,
     private val profiles: com.nuvio.tv.data.local.ProfileDataStore,
-    private val shuffle: com.nuvio.tv.data.local.EpisodeShuffleStore
+    private val shuffle: com.nuvio.tv.data.local.EpisodeShuffleStore,
+    private val addonPreferences: com.nuvio.tv.data.local.AddonPreferences
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val store = context.applicationContext.getSharedPreferences("livetv_drive_sync", Context.MODE_PRIVATE)
@@ -90,8 +91,12 @@ class LiveTvDriveSync @Inject constructor(
     private suspend fun exportSetup(): JSONObject = prefs.exportForSync().also { data ->
         data.put(TVDB_VERSION, JSONObject().put("t", "i").put("v", 1))
         data.put(SHUFFLE_VERSION, JSONObject().put("t", "i").put("v", 1))
+        data.put(SOURCES_VERSION, JSONObject().put("t", "i").put("v", 1))
         profiles.profilesList.first().forEach { profile ->
             data.put("$PROFILE_PREFIX${profile.id}", JSONObject().put("t", "str").put("v", profile.name))
+            addonPreferences.exportStreamSourceSelections(profile.id).forEach { (key, value) ->
+                data.put("$SOURCES_PREFIX${profile.id}:$key", JSONObject().put("t", "str").put("v", value))
+            }
             shuffle.exportSelections(profile.id).forEach { (key, value) ->
                 data.put("$SHUFFLE_PREFIX${profile.id}:$key", JSONObject().put("t", "str").put("v", value))
             }
@@ -104,11 +109,11 @@ class LiveTvDriveSync @Inject constructor(
     }
 
     private fun hasSetup(data: JSONObject?) = prefs.syncHasSources(data) ||
-        data?.keys()?.asSequence()?.any { it.startsWith(SHUFFLE_PREFIX) } == true ||
+        data?.keys()?.asSequence()?.any { it.startsWith(SHUFFLE_PREFIX) || it.startsWith(SOURCES_PREFIX) } == true ||
         data?.keys()?.asSequence()?.any { it.startsWith(TVDB_PREFIX) && (":order:" in it || ":reset:" in it) } == true
 
     private fun liveData(data: JSONObject) = JSONObject(data.toString()).also { out ->
-        out.keys().asSequence().filter { it == TVDB_VERSION || it == SHUFFLE_VERSION || it.startsWith(TVDB_PREFIX) || it.startsWith(SHUFFLE_PREFIX) || it.startsWith(PROFILE_PREFIX) }.toList().forEach(out::remove)
+        out.keys().asSequence().filter { it == TVDB_VERSION || it == SHUFFLE_VERSION || it == SOURCES_VERSION || it.startsWith(SOURCES_PREFIX) || it.startsWith(TVDB_PREFIX) || it.startsWith(SHUFFLE_PREFIX) || it.startsWith(PROFILE_PREFIX) }.toList().forEach(out::remove)
     }
 
     private val http = OkHttpClient.Builder()
@@ -208,6 +213,9 @@ class LiveTvDriveSync @Inject constructor(
         profiles.profilesList.map { Unit },
         profiles.profilesList.flatMapLatest { list ->
             kotlinx.coroutines.flow.merge(*list.map { shuffle.selectionChanges(it.id) }.toTypedArray())
+        },
+        profiles.profilesList.flatMapLatest { list ->
+            kotlinx.coroutines.flow.merge(*list.map { addonPreferences.streamSourceSelectionChanges(it.id) }.toTypedArray())
         },
         * (1..com.nuvio.tv.core.profile.ProfileManager.MAX_PROFILES).map(orders::selectionChanges).toTypedArray()
     )
@@ -506,10 +514,16 @@ class LiveTvDriveSync @Inject constructor(
                     it.removePrefix("$SHUFFLE_PREFIX$id:") to data.getJSONObject(it).getString("v")
                 }
             } else emptyMap()
+            val sourceSelections = if (data.has(SOURCES_VERSION)) (1..com.nuvio.tv.core.profile.ProfileManager.MAX_PROFILES).associateWith { id ->
+                data.keys().asSequence().filter { it.startsWith("$SOURCES_PREFIX$id:") }.associate {
+                    it.removePrefix("$SOURCES_PREFIX$id:") to data.getJSONObject(it).getString("v")
+                }
+            } else emptyMap()
+            sourceSelections.values.forEach { com.nuvio.tv.data.local.validateStreamSourceSelections(it) }
             shuffleSelections.values.forEach { com.nuvio.tv.data.local.decodeShuffleSelections(it) }
             selections.values.forEach { com.nuvio.tv.data.tvdb.validateTvdbSelections(it) }
             val localProfiles = profiles.profilesList.first().associateBy { it.id }
-            val profileIds = selections.filterValues { it.isNotEmpty() }.keys + shuffleSelections.filterValues { it.isNotEmpty() }.keys + data.keys().asSequence()
+            val profileIds = selections.filterValues { it.isNotEmpty() }.keys + shuffleSelections.filterValues { it.isNotEmpty() }.keys + sourceSelections.filterValues { it.isNotEmpty() }.keys + data.keys().asSequence()
                 .filter { it.startsWith(PROFILE_PREFIX) }.map { it.removePrefix(PROFILE_PREFIX).toInt() }.toSet()
             profileIds.forEach { id ->
                 check(data.optJSONObject("$PROFILE_PREFIX$id")?.optString("v") == localProfiles[id]?.name) {
@@ -518,6 +532,7 @@ class LiveTvDriveSync @Inject constructor(
             }
             val changed = prefs.importFromSync(liveData(data))
             selections.forEach { (id, values) -> orders.importSelections(id, values) }
+            sourceSelections.filterKeys { it in localProfiles }.forEach { (id, values) -> addonPreferences.importStreamSourceSelections(id, values) }
             shuffleSelections.filterKeys { it in localProfiles }.forEach { (id, values) -> shuffle.importSelections(id, values) }
             val after = exportSetup()
             // What really changed here. Nothing: no reload at all (it used to reload Live TV,
@@ -829,6 +844,8 @@ class LiveTvDriveSync @Inject constructor(
         const val PROFILE_PREFIX = "reseq_profile:"
         const val TVDB_PREFIX = "reseq_tvdb:"
         const val TVDB_VERSION = "reseq_tvdb_version"
+        const val SOURCES_PREFIX = "reseq_sources:"
+        const val SOURCES_VERSION = "reseq_sources_version"
         const val SHUFFLE_PREFIX = "reseq_shuffle:"
         const val SHUFFLE_VERSION = "reseq_shuffle_version"
         const val TAG = "LiveTvDriveSync"

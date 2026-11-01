@@ -1,5 +1,6 @@
 package com.nuvio.tv.ui.screens.player
 
+import com.nuvio.tv.domain.model.tvdbPlaybackContext
 import com.nuvio.tv.domain.model.displaySeason
 import com.nuvio.tv.domain.model.episodeSequenceComparator
 import com.nuvio.tv.domain.model.hasResolvedSource
@@ -155,9 +156,14 @@ internal fun PlayerRuntimeController.showSourcesPanel() {
     loadSourceStreams(forceRefresh = false)
 }
 
-internal fun PlayerRuntimeController.buildSourceRequestKey(type: String, videoId: String, season: Int?, episode: Int?): String {
-    return "$type|$videoId|${season ?: -1}|${episode ?: -1}"
+internal fun PlayerRuntimeController.buildSourceRequestKey(type: String, videoId: String, season: Int?, episode: Int?,
+    selection: com.nuvio.tv.domain.model.StreamContentContext? = null): String {
+    return "$type|$videoId|${season ?: -1}|${episode ?: -1}|$selection"
 }
+
+private fun PlayerRuntimeController.vodContentContext(video: Video? = null) = com.nuvio.tv.domain.model.StreamContentContext(
+    contentId.orEmpty(), contentName ?: title, com.nuvio.tv.core.tracking.extractTrackingYear(year),
+    video?.title ?: currentEpisodeTitle, if (video == null) currentTvdbContext() else video.tvdbPlaybackContext())
 
 private data class SourceStreamsRequest(
     val type: String,
@@ -191,7 +197,7 @@ internal fun PlayerRuntimeController.loadSourceStreams(forceRefresh: Boolean) {
     val seasonArg = request.season
     val episodeArg = request.episode
 
-    val requestKey = buildSourceRequestKey(type = type, videoId = vid, season = seasonArg, episode = episodeArg)
+    val requestKey = buildSourceRequestKey(type = type, videoId = vid, season = seasonArg, episode = episodeArg, selection = vodContentContext())
     val state = _uiState.value
     val hasCachedPayload = state.sourceAllStreams.isNotEmpty() || state.sourceStreamsError != null
 
@@ -243,7 +249,8 @@ internal fun PlayerRuntimeController.loadSourceStreams(forceRefresh: Boolean) {
             videoId = vid,
             season = seasonArg,
             episode = episodeArg,
-            forceRefresh = forceRefresh
+            forceRefresh = forceRefresh,
+            contentContext = vodContentContext()
         ).collect { result ->
             when (result) {
                 is NetworkResult.Success -> {
@@ -703,7 +710,8 @@ internal fun PlayerRuntimeController.handleStreamRedirect(requestedUrl: String, 
                     type = request.type,
                     videoId = request.videoId,
                     season = request.season,
-                    episode = request.episode
+                    episode = request.episode,
+                    contentContext = vodContentContext()
                 )?.let { cached ->
                     findRedirectTargetStream(cached.flatMap { it.streams }, addonName, requestedUrl, resolvedUrl)
                 }
@@ -1233,7 +1241,7 @@ internal fun PlayerRuntimeController.loadStreamsForEpisode(
         return
     }
 
-    val requestKey = buildEpisodeRequestKey(type = type, video = video)
+    val requestKey = buildEpisodeRequestKey(type = type, video = video) + vodContentContext(video).toString()
     episodeStreamsScope?.cancel()
     episodeStreamsScope = null
     episodeStreamsJob = null
@@ -1307,7 +1315,8 @@ internal fun PlayerRuntimeController.loadStreamsForEpisode(
             videoId = video.id,
             season = video.season,
             episode = video.episode,
-            forceRefresh = forceRefresh
+            forceRefresh = forceRefresh,
+            contentContext = vodContentContext(video)
         ).collect { result ->
             when (result) {
                 is NetworkResult.Success -> {
@@ -1389,6 +1398,7 @@ private suspend fun PlayerRuntimeController.selectEpisodeAutoPlayStream(
 ): Stream? {
     val installedAddonNames = streamAddonsFor(video.id).map { it.displayName }.toSet()
     return StreamAutoPlaySelector.selectAutoPlayStream(
+        sourceSettings = settings,
         streams = streams,
         mode = settings.streamAutoPlayMode,
         regexPattern = settings.streamAutoPlayRegex,
@@ -1912,7 +1922,8 @@ internal fun PlayerRuntimeController.preloadNextEpisodeSources() {
             type = type,
             videoId = nextVideo.id,
             season = nextVideo.season,
-            episode = nextVideo.episode
+            episode = nextVideo.episode,
+            contentContext = vodContentContext(nextVideo)
         ).collect { /* results cached by StreamSearchSessionCache */ }
     }
 }
@@ -2028,6 +2039,7 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                 val orderedStreams = StreamAutoPlaySelector.orderAddonStreams(data, installedAddonOrder, preferredServerNames)
                 val allStreams = orderedStreams.flatMap { it.streams }
                 return StreamAutoPlaySelector.selectAutoPlayStream(
+                    sourceSettings = playerSettings,
                     streams = allStreams,
                     mode = effectiveMode,
                     regexPattern = effectiveRegex,
@@ -2058,7 +2070,7 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                     nextEpisode = nextVideo.episode ?: 0
                 ) ?: currentFilename?.takeIf { it.isNotBlank() }
                 if (nextFilename != null) {
-                    val bingeAndFilename = allStreams.firstOrNull { stream ->
+                    val bingeAndFilename = StreamAutoPlaySelector.automaticStreams(allStreams, playerSettings, installedAddonOrder.toSet()).firstOrNull { stream ->
                         !stream.isExternal() &&
                             stream.behaviorHints?.bingeGroup == currentStreamBingeGroup &&
                             com.nuvio.tv.core.player.FilenameEpisodeMatcher.matches(
@@ -2069,6 +2081,7 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                 }
                 // Early fallback: binge group alone
                 return StreamAutoPlaySelector.selectAutoPlayStream(
+                    sourceSettings = playerSettings,
                     streams = allStreams,
                     mode = effectiveMode,
                     regexPattern = effectiveRegex,
@@ -2092,7 +2105,7 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                 ) ?: currentFilename?.takeIf { it.isNotBlank() }
                     ?: return null
                 val orderedStreams = StreamAutoPlaySelector.orderAddonStreams(data, installedAddonOrder, preferredServerNames)
-                return orderedStreams.flatMap { it.streams }.firstOrNull { stream ->
+                return StreamAutoPlaySelector.automaticStreams(orderedStreams.flatMap { it.streams }, playerSettings, installedAddonOrder.toSet()).firstOrNull { stream ->
                     !stream.isExternal() &&
                         com.nuvio.tv.core.player.FilenameEpisodeMatcher.matches(
                             stream.behaviorHints?.filename, nextFilename
@@ -2113,7 +2126,8 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                     type = type,
                     videoId = nextVideo.id,
                     season = nextVideo.season,
-                    episode = nextVideo.episode
+                    episode = nextVideo.episode,
+                    contentContext = vodContentContext(nextVideo)
                 ).collect { result ->
                     when (result) {
                         is NetworkResult.Success -> {

@@ -1553,7 +1553,7 @@ private fun AddonCardContent(
                             Icon(imageVector = Icons.Default.ArrowDownward, contentDescription = stringResource(R.string.cd_move_down))
                         }
                     }
-                    Button(
+                    if (!com.nuvio.tv.livetv.ondemand.IptvStreamSources.isPlaylist(addon.baseUrl)) Button(
                         onClick = onRemove,
                         modifier = Modifier.semantics { role = Role.Button },
                         colors = ButtonDefaults.colors(
@@ -1583,7 +1583,7 @@ private fun AddonCardContent(
 
         Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
         Text(
-            text = addon.baseUrl,
+            text = if (com.nuvio.tv.livetv.ondemand.IptvStreamSources.isPlaylist(addon.baseUrl)) "IPTV playlist source" else addon.baseUrl,
             style = MaterialTheme.typography.bodySmall.copy(
                 textDirection = addon.baseUrl.contentTextDirection()
             ),

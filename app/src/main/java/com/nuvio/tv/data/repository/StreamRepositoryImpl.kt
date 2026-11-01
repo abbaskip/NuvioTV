@@ -59,7 +59,9 @@ class StreamRepositoryImpl @Inject constructor(
     private val tmdbService: TmdbService,
     private val debridStreamPresentation: DebridStreamPresentation,
     private val localDebridAvailabilityService: LocalDebridAvailabilityService,
-    private val serverStreams: ServerStreams
+    private val serverStreams: ServerStreams,
+    private val iptvSources: com.nuvio.tv.livetv.ondemand.IptvStreamSources? = null,
+    private val iptvStreams: com.nuvio.tv.livetv.ondemand.IptvVodStreams? = null
 ) : StreamRepository {
     private val streamSearchSessions = StreamSearchSessionCache()
     private val localPluginSearchPaused = MutableStateFlow(false)
@@ -86,7 +88,8 @@ class StreamRepositoryImpl @Inject constructor(
         val enabledScrapers: List<ScraperInfo>,
         val groupPluginsByRepository: Boolean,
         val pluginRepositories: List<PluginRepository>,
-        val debridSettings: DebridSettings
+        val debridSettings: DebridSettings,
+        val iptvRevision: String
     )
 
     override fun getStreamsFromAllAddons(
@@ -94,11 +97,12 @@ class StreamRepositoryImpl @Inject constructor(
         videoId: String,
         season: Int?,
         episode: Int?,
-        forceRefresh: Boolean
+        forceRefresh: Boolean,
+        contentContext: com.nuvio.tv.domain.model.StreamContentContext?
     ): Flow<NetworkResult<List<AddonStreams>>> = flow {
         val sourceConfiguration = captureSourceConfiguration()
         val isNativeServerRequest = serverStreams.isNativeRequest(videoId)
-        val requestKey = buildStreamSearchRequestKey(sourceConfiguration, type, videoId, season, episode)
+        val requestKey = buildStreamSearchRequestKey(sourceConfiguration, type, videoId, season, episode, contentContext)
 
         emitAll(
             streamSearchSessions.observe(
@@ -115,7 +119,9 @@ class StreamRepositoryImpl @Inject constructor(
                     hasCompatiblePlugins = !isNativeServerRequest &&
                         sourceConfiguration.pluginsEnabled &&
                         sourceConfiguration.enabledScrapers.any { scraper -> scraper.supportsType(type) },
-                    serverSources = serverStreams.sources(type, videoId, season, episode, forceRefresh)
+                    serverSources = serverStreams.sources(type, videoId, season, episode, forceRefresh),
+                    contentContext = contentContext,
+                    profileId = sourceConfiguration.profileId
                 )
             }
         )
@@ -125,9 +131,10 @@ class StreamRepositoryImpl @Inject constructor(
         type: String,
         videoId: String,
         season: Int?,
-        episode: Int?
+        episode: Int?,
+        contentContext: com.nuvio.tv.domain.model.StreamContentContext?
     ): List<AddonStreams>? = streamSearchSessions.peek(
-        buildStreamSearchRequestKey(captureSourceConfiguration(), type, videoId, season, episode)
+        buildStreamSearchRequestKey(captureSourceConfiguration(), type, videoId, season, episode, contentContext)
     )
 
     private fun buildStreamSearchRequestKey(
@@ -135,7 +142,8 @@ class StreamRepositoryImpl @Inject constructor(
         type: String,
         videoId: String,
         season: Int?,
-        episode: Int?
+        episode: Int?,
+        contentContext: com.nuvio.tv.domain.model.StreamContentContext?
     ): StreamSearchRequestKey = StreamSearchRequestKey(
         profileId = sourceConfiguration.profileId,
         type = type.lowercase(),
@@ -152,19 +160,20 @@ class StreamRepositoryImpl @Inject constructor(
                 .withoutRawCredentials()
                 .toString(),
             serverRevision = serverStreams.revision
-        )
+        ).let { (it + sourceConfiguration.iptvRevision + contentContext.toString()).sha256() }
     )
 
     private suspend fun captureSourceConfiguration(): StreamSourceConfigurationSnapshot {
         while (true) {
             val profileId = profileManager.activeProfileId.value
-            val addons = addonRepository.getInstalledAddons().first().enabledAddons()
+            val addons = (iptvSources?.sources() ?: addonRepository.getInstalledAddons()).first().enabledAddons()
             val pluginsEnabled = pluginManager.pluginsEnabled.first()
             val enabledScrapers = if (pluginsEnabled) pluginManager.enabledScrapers.first() else emptyList()
             val groupPluginsByRepository = pluginsEnabled && pluginManager.groupStreamsByRepository.first()
             val pluginRepositories = if (groupPluginsByRepository) pluginManager.repositories.first() else emptyList()
             val debridSettings = debridSettingsDataStore.settings.first()
 
+            val iptvRevision = iptvStreams?.revision().orEmpty()
             if (profileManager.activeProfileId.value != profileId) continue
 
             return StreamSourceConfigurationSnapshot(
@@ -174,7 +183,8 @@ class StreamRepositoryImpl @Inject constructor(
                 enabledScrapers = enabledScrapers,
                 groupPluginsByRepository = groupPluginsByRepository,
                 pluginRepositories = pluginRepositories,
-                debridSettings = debridSettings
+                debridSettings = debridSettings,
+                iptvRevision = iptvRevision
             )
         }
     }
@@ -188,7 +198,9 @@ class StreamRepositoryImpl @Inject constructor(
         addons: List<Addon>,
         debridSettings: DebridSettings,
         hasCompatiblePlugins: Boolean,
-        serverSources: List<ServerStreamSource>
+        serverSources: List<ServerStreamSource>,
+        contentContext: com.nuvio.tv.domain.model.StreamContentContext?,
+        profileId: Int
     ): Flow<NetworkResult<List<AddonStreams>>> = flow {
         emit(NetworkResult.Loading)
 
@@ -207,6 +219,16 @@ class StreamRepositoryImpl @Inject constructor(
             val accumulatedResults = mutableListOf<AddonStreams>()
 
             coroutineScope {
+                val iptvTarget = if (iptvStreams != null && streamAddons.any {
+                    com.nuvio.tv.livetv.ondemand.IptvStreamSources.isPlaylist(it.baseUrl)
+                }) async {
+                    try { iptvStreams.prepare(type, videoId, season, episode, contentContext) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) {
+                        Log.w(TAG, "IPTV target lookup failed (${error.javaClass.simpleName})")
+                        null
+                    }
+                } else null
                 // Channel to receive results as they complete
                 val resultChannel = Channel<AddonStreams>(Channel.UNLIMITED)
                 
@@ -218,7 +240,10 @@ class StreamRepositoryImpl @Inject constructor(
                 streamAddons.forEach { addon ->
                     launch {
                         try {
-                            val streamsResult = getStreamsFromAddon(addon, type, videoId)
+                            val isPlaylist = com.nuvio.tv.livetv.ondemand.IptvStreamSources.isPlaylist(addon.baseUrl)
+                            val streamsResult = if (isPlaylist) NetworkResult.Success(
+                                iptvStreams?.load(addon.baseUrl, addon.displayName, iptvTarget?.await(), profileId).orEmpty()
+                            ) else getStreamsFromAddon(addon, type, videoId)
                             when (streamsResult) {
                                 is NetworkResult.Success -> {
                                     if (streamsResult.data.isNotEmpty()) {
@@ -235,7 +260,7 @@ class StreamRepositoryImpl @Inject constructor(
                                     } else {
                                         // Stream endpoint returned empty - try inline
                                         // streams from meta response as fallback.
-                                        val inlineStreams = fetchInlineStreamsFromMeta(
+                                        val inlineStreams = if (isPlaylist) emptyList() else fetchInlineStreamsFromMeta(
                                             addon, type, videoId
                                         )
                                         if (inlineStreams.isNotEmpty()) {
@@ -258,11 +283,13 @@ class StreamRepositoryImpl @Inject constructor(
                             }
                         } catch (e: Exception) {
                             if (e is CancellationException) throw e
-                            Log.e(TAG, "Addon ${addon.name} failed: ${e.message}")
+                            val playlistFailure = com.nuvio.tv.livetv.ondemand.IptvStreamSources.isPlaylist(addon.baseUrl)
+                            if (playlistFailure) Log.w(TAG, "IPTV catalogue lookup failed")
+                            else Log.e(TAG, "Addon ${addon.name} failed: ${e.message}")
                             attemptedFailures += StreamAttemptFailure(
                                 addonName = addon.displayName,
                                 kind = StreamFailureKind.REQUEST_FAILED,
-                                detail = e.message ?: context.getString(com.nuvio.tv.R.string.stream_error_detail_addon_request_failed)
+                                detail = if (playlistFailure) "IPTV catalogue lookup unavailable" else e.message ?: context.getString(com.nuvio.tv.R.string.stream_error_detail_addon_request_failed)
                             )
                         } finally {
                             if (completedJobs.incrementAndGet() >= totalJobs) {
@@ -636,6 +663,9 @@ class StreamRepositoryImpl @Inject constructor(
         type: String,
         videoId: String
     ): NetworkResult<List<Stream>> {
+        if (com.nuvio.tv.livetv.ondemand.IptvStreamSources.isPlaylist(addon.baseUrl)) {
+            return NetworkResult.Error("IPTV catalogue searches require the selected content context.")
+        }
         val cleanBaseUrl = addon.baseUrl.trimEnd('/')
         val queryStart = cleanBaseUrl.indexOf('?')
         val basePath = if (queryStart >= 0) cleanBaseUrl.substring(0, queryStart).trimEnd('/') else cleanBaseUrl

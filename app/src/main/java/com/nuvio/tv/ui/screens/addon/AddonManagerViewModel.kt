@@ -64,6 +64,7 @@ import javax.inject.Inject
 @HiltViewModel
 class AddonManagerViewModel @Inject constructor(
     private val addonRepository: AddonRepository,
+    private val iptvSources: com.nuvio.tv.livetv.ondemand.IptvStreamSources,
     private val layoutPreferenceDataStore: LayoutPreferenceDataStore,
     private val experienceModeDataStore: ExperienceModeDataStore,
     private val collectionsDataStore: CollectionsDataStore,
@@ -216,7 +217,7 @@ class AddonManagerViewModel @Inject constructor(
 
     fun setAddonEnabled(baseUrl: String, enabled: Boolean) {
         viewModelScope.launch {
-            addonRepository.setAddonEnabled(baseUrl, enabled)
+            iptvSources.setEnabled(baseUrl, enabled)
         }
     }
 
@@ -242,7 +243,7 @@ class AddonManagerViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            addonRepository.setAddonOrder(reordered.map { it.baseUrl })
+            iptvSources.setOrder(reordered)
         }
     }
 
@@ -259,7 +260,7 @@ class AddonManagerViewModel @Inject constructor(
             context = context,
             webConfigMode = webConfigMode,
             currentPageStateProvider = {
-                val addons = _uiState.value.installedAddons
+                val addons = _uiState.value.installedAddons.filterNot { com.nuvio.tv.livetv.ondemand.IptvStreamSources.isPlaylist(it.baseUrl) }
                 val orderedCatalogs = buildOrderedCatalogEntries(
                     addons = addons.enabledAddons(),
                     savedOrderKeys = homeCatalogOrderKeys,
@@ -493,7 +494,8 @@ class AddonManagerViewModel @Inject constructor(
     }
 
     private fun handleChangeProposed(change: PendingAddonChange) {
-        val currentUrls = _uiState.value.installedAddons.map { normalizeUrlForComparison(it.baseUrl) }.toSet()
+        val realAddons = _uiState.value.installedAddons.filterNot { com.nuvio.tv.livetv.ondemand.IptvStreamSources.isPlaylist(it.baseUrl) }
+        val currentUrls = realAddons.map { normalizeUrlForComparison(it.baseUrl) }.toSet()
         val proposedNormalized = change.proposedUrls.map { normalizeUrlForComparison(it) }.toSet()
         val currentCatalogEntries = buildOrderedCatalogEntries(
             addons = _uiState.value.installedAddons.enabledAddons(),
@@ -508,7 +510,7 @@ class AddonManagerViewModel @Inject constructor(
         }
 
         val added = change.proposedUrls.filter { normalizeUrlForComparison(it) !in currentUrls }
-        val removed = _uiState.value.installedAddons
+        val removed = realAddons
             .map { it.baseUrl }
             .filter { normalizeUrlForComparison(it) !in proposedNormalized }
         val resolvedProposedCatalogOrderKeys = if (change.proposedCatalogOrderKeys.isEmpty()) {
@@ -795,7 +797,7 @@ class AddonManagerViewModel @Inject constructor(
             if (_uiState.value.installedAddons.isEmpty()) {
                 _uiState.update { it.copy(isLoading = true) }
             }
-            addonRepository.getInstalledAddons()
+            iptvSources.sources()
                 .catch { error ->
                     _uiState.update { it.copy(isLoading = false, error = error.message) }
                 }

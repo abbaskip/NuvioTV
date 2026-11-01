@@ -77,7 +77,7 @@ internal fun PlayerRuntimeController.serverImdbId(contentId: String): String? =
     metaRepository.getCachedMeta(contentType ?: "movie", contentId)?.imdbId?.takeIf { it.startsWith("tt") }
 
 internal suspend fun PlayerRuntimeController.streamAddonsFor(videoId: String): List<Addon> =
-    if (serverStreams.isNativeRequest(videoId)) emptyList() else addonRepository.getInstalledAddons().first().enabledAddons()
+    if (serverStreams.isNativeRequest(videoId)) emptyList() else (iptvSources?.sources() ?: addonRepository.getInstalledAddons()).first().enabledAddons()
 
 internal fun PlayerRuntimeController.serverSourceNames(type: String, videoId: String): List<String> =
     serverStreams.sources(type, videoId, season = null, episode = null).map { it.name }

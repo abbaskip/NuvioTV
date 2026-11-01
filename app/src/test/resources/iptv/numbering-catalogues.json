@@ -1,0 +1,134 @@
+[
+  {
+    "tmdb": "2316",
+    "title": "The Office (2005)",
+    "episodes": [
+      {
+        "season": 5,
+        "episode": 1,
+        "title": "The Office - S05E01 - Weight Loss"
+      },
+      {
+        "season": 5,
+        "episode": 2,
+        "title": "The Office - S05E02 - Business Ethics"
+      },
+      {
+        "season": 5,
+        "episode": 3,
+        "title": "The Office - S05E03 - Baby Shower"
+      },
+      {
+        "season": 5,
+        "episode": 13,
+        "title": "The Office - S05E13 - Stress Relief"
+      },
+      {
+        "season": 5,
+        "episode": 14,
+        "title": "The Office - S05E14 - Lecture Circuit (1)"
+      },
+      {
+        "season": 5,
+        "episode": 15,
+        "title": "The Office - S05E15 - Lecture Circuit (2)"
+      },
+      {
+        "season": 5,
+        "episode": 16,
+        "title": "The Office - S05E16 - Blood Drive"
+      },
+      {
+        "season": 5,
+        "episode": 17,
+        "title": "The Office - S05E17 - Golden Ticket"
+      }
+    ]
+  },
+  {
+    "tmdb": "1437",
+    "title": "Firefly (2002)",
+    "episodes": [
+      {
+        "season": 0,
+        "episode": 1,
+        "title": "Firefly - S00E01 - Trash"
+      },
+      {
+        "season": 0,
+        "episode": 3,
+        "title": "Firefly - S00E03 - Heart of Gold"
+      },
+      {
+        "season": 1,
+        "episode": 1,
+        "title": "Firefly - S01E01 - The Train Job"
+      },
+      {
+        "season": 1,
+        "episode": 2,
+        "title": "Firefly - S01E02 - Bushwhacked"
+      },
+      {
+        "season": 1,
+        "episode": 3,
+        "title": "Firefly - S01E03 - Our Mrs. Reynolds"
+      },
+      {
+        "season": 1,
+        "episode": 4,
+        "title": "Firefly - S01E04 - Jaynestown"
+      },
+      {
+        "season": 1,
+        "episode": 5,
+        "title": "Firefly - S01E05 - Out of Gas"
+      },
+      {
+        "season": 1,
+        "episode": 6,
+        "title": "Firefly - S01E06 - Shindig"
+      },
+      {
+        "season": 1,
+        "episode": 7,
+        "title": "Firefly - S01E07 - Safe"
+      },
+      {
+        "season": 1,
+        "episode": 8,
+        "title": "Firefly - S01E08 - Ariel"
+      },
+      {
+        "season": 1,
+        "episode": 9,
+        "title": "Firefly - S01E09 - War Stories"
+      },
+      {
+        "season": 1,
+        "episode": 10,
+        "title": "Firefly - S01E10 - Objects in Space"
+      },
+      {
+        "season": 1,
+        "episode": 11,
+        "title": "Firefly - S01E11 - Serenity"
+      },
+      {
+        "season": 1,
+        "episode": 12,
+        "title": "Firefly - S01E12 - No Episode Title"
+      },
+      {
+        "season": 1,
+        "episode": 13,
+        "title": "Firefly - S01E13 - No Episode Title"
+      },
+      {
+        "season": 1,
+        "episode": 14,
+        "title": "Firefly - S01E14 - No Episode Title"
+      }
+    ]
+  }
+]
