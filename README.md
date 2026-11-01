@@ -8,6 +8,8 @@ Nuvio ReSeq is an independent Android TV fork of [Nuvio](https://github.com/Nuvi
 
 **[Download the latest APK](https://github.com/abbaskip/Nuvio-ReSeq/releases/latest)** · [All releases](https://github.com/abbaskip/Nuvio-ReSeq/releases) · [Report an issue](https://github.com/abbaskip/Nuvio-ReSeq/issues)
 
+[Project website](https://abbaskip.github.io/Nuvio-ReSeq/) · [Privacy Policy](https://abbaskip.github.io/Nuvio-ReSeq/privacy.html) · [Terms of Service](https://abbaskip.github.io/Nuvio-ReSeq/terms.html)
+
 ## Choose the episode order that matches your sources
 
 Open a series and select **Episode order**:

@@ -1,5 +1,11 @@
 # Nuvio ReSeq privacy
 
+The current public [Privacy Policy](https://abbaskip.github.io/Nuvio-ReSeq/privacy.html)
+includes Google Drive backup contents, credential storage, permission differences
+between builds, third-party services, and instructions for disconnecting and deleting
+data. Please read that policy for the complete disclosures. The original summary
+below is retained as repository background.
+
 Nuvio ReSeq runs on your Android TV device. The maintainer does not operate a separate ReSeq account service or tracking backend. This release has no ReSeq telemetry endpoint.
 
 The app contacts the metadata providers, addons and integrations you configure. These requests can include titles, catalogue IDs, search terms and episode numbers. Connected tracking services can receive playback progress and watched activity through Nuvio’s existing integration settings. Your chosen read sources control watched indicators, resume and Continue Watching; playback can scrobble to each connected service.

@@ -61,7 +61,16 @@ local-assets/supporter-profile-backgrounds/
 logs
 AGENTS.md
 /PR.md
-docs/
+docs/*
+!docs/index.html
+!docs/privacy.html
+!docs/terms.html
+!docs/WEBSITE.md
+!docs/assets/
+docs/assets/*
+!docs/assets/site.css
+!docs/assets/logo.png
+!docs/assets/icon.png
 status-page/
 
 # Private release and development material
