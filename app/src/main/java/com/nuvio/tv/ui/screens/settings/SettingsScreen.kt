@@ -40,6 +40,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Explore
@@ -158,6 +159,7 @@ private sealed interface ExperienceModeLoadState {
 private fun settingsSectionSpec(category: SettingsCategory): SettingsSectionSpec = when (category) {
     SettingsCategory.ACCOUNT -> SettingsSectionSpec(category, stringResource(R.string.settings_account), Icons.Default.Person, destination = SettingsSectionDestination.Inline)
     SettingsCategory.PROFILES -> SettingsSectionSpec(category, stringResource(R.string.settings_profiles), Icons.Default.People, destination = SettingsSectionDestination.Inline)
+    SettingsCategory.BACKUP_SYNC -> SettingsSectionSpec(category, "Backup & Sync", Icons.Default.Backup, destination = SettingsSectionDestination.Inline)
     SettingsCategory.WATCH_PARTY -> SettingsSectionSpec(category, stringResource(R.string.party_title), Icons.Rounded.Groups, destination = SettingsSectionDestination.Inline)
     SettingsCategory.APPEARANCE -> SettingsSectionSpec(category, stringResource(R.string.appearance_title), Icons.Default.Palette, destination = SettingsSectionDestination.Inline)
     SettingsCategory.LAYOUT -> SettingsSectionSpec(category, stringResource(R.string.settings_layout), Icons.Default.GridView, destination = SettingsSectionDestination.Inline)
@@ -236,6 +238,7 @@ fun SettingsScreen(
             SettingsCategory.LAYOUT to FocusRequester(),
             SettingsCategory.CONTENT_DISCOVERY to FocusRequester(),
             SettingsCategory.IPTV to FocusRequester(),
+            SettingsCategory.BACKUP_SYNC to FocusRequester(),
             SettingsCategory.INTEGRATION to FocusRequester(),
             SettingsCategory.TRACKING to FocusRequester(),
             SettingsCategory.PLAYBACK to FocusRequester(),
@@ -933,6 +936,9 @@ private fun SettingsDetailPane(
                 experienceModeViewModel = experienceModeViewModel
             )
         }
+        SettingsCategory.BACKUP_SYNC -> BackupSyncSettingsContent(
+            initialFocusRequester = if (allowDetailAutofocus) contentFocusRequesters[SettingsCategory.BACKUP_SYNC] else null
+        )
         SettingsCategory.IPTV -> LiveTvSettingsContent(
             page = LiveTvPage.HUB,
             initialFocusRequester = if (allowDetailAutofocus) contentFocusRequesters[SettingsCategory.IPTV] else null

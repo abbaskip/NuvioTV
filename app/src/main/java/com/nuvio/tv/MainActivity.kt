@@ -297,6 +297,9 @@ open class MainActivity : ComponentActivity() {
     lateinit var startupSyncService: StartupSyncService
 
     @Inject
+    lateinit var driveSync: dagger.Lazy<com.nuvio.tv.livetv.sync.LiveTvDriveSync>
+
+    @Inject
     lateinit var androidTvChannelSyncService: com.nuvio.tv.core.sync.androidtv.AndroidTvChannelSyncService
 
     @Inject
@@ -380,6 +383,12 @@ open class MainActivity : ComponentActivity() {
         externalPlaybackTracker.activityLauncher = externalPlayerLauncher
 
         PluginRuntimeHooks.onActivityCreate(this)
+        // Drive also syncs TVDB/Shuffle choices; defer it past startup without loading IPTV.
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            delay(5_000)
+            driveSync.get().start()
+        }
+
 
         window?.decorView?.post {
             val snapshot = com.nuvio.tv.core.player.DisplayCapabilities.detect(this)

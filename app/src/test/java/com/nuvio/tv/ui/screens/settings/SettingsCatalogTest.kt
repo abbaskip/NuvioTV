@@ -19,6 +19,7 @@ class SettingsCatalogTest {
             listOf(
                 SettingsCategory.ACCOUNT,
                 SettingsCategory.PROFILES,
+                SettingsCategory.BACKUP_SYNC,
                 SettingsCategory.APPEARANCE,
                 SettingsCategory.LAYOUT,
                 SettingsCategory.CONTENT_DISCOVERY,
@@ -44,6 +45,7 @@ class SettingsCatalogTest {
 
         assertFalse(SettingsCategory.ACCOUNT in categories)
         assertFalse(SettingsCategory.PROFILES in categories)
+        assertFalse(SettingsCategory.BACKUP_SYNC in categories)
         assertEquals(SettingsCategory.APPEARANCE, categories.first())
     }
 
@@ -120,8 +122,8 @@ class SettingsCatalogTest {
             assertFalse(SettingsCategory.WATCH_PARTY in unavailable)
         }
         assertEquals(
-            listOf(SettingsCategory.ACCOUNT, SettingsCategory.PROFILES, SettingsCategory.WATCH_PARTY),
-            visibleSettingsCategories(true, isEssentialMode = false, isDebugBuild = false, isWatchPartyAvailable = true).take(3)
+            listOf(SettingsCategory.ACCOUNT, SettingsCategory.PROFILES, SettingsCategory.BACKUP_SYNC, SettingsCategory.WATCH_PARTY),
+            visibleSettingsCategories(true, isEssentialMode = false, isDebugBuild = false, isWatchPartyAvailable = true).take(4)
         )
     }
 

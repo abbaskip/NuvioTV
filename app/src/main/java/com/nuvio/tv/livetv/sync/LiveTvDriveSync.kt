@@ -67,7 +67,7 @@ data class SignInPrompt(val userCode: String, val url: String, val qrUrl: String
 class LiveTvDriveSync @Inject constructor(
     @ApplicationContext private val context: Context,
     private val prefs: LiveTvPreferences,
-    private val repository: LiveTvRepository,
+    private val repository: dagger.Lazy<LiveTvRepository>,
     private val orders: com.nuvio.tv.data.tvdb.TvdbOrderStore,
     private val profiles: com.nuvio.tv.data.local.ProfileDataStore,
     private val shuffle: com.nuvio.tv.data.local.EpisodeShuffleStore
@@ -175,7 +175,10 @@ class LiveTvDriveSync @Inject constructor(
         if (started || !_state.value.connected) return
         started = true
         scope.launch {
-            if (_state.value.connected && _state.value.autoSync) pull(force = false)
+            if (_state.value.connected && _state.value.autoSync) {
+                pull(force = false)
+                push(force = false)
+            }
         }
         // Poll only while the app process is alive; edits are still debounced below.
         scope.launch {
@@ -528,7 +531,7 @@ class LiveTvDriveSync @Inject constructor(
             com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Sync: applied changes from your other TV (${keys.take(6).joinToString()}${if (keys.size > 6) "…" else ""})")
             // Download any playlists or guides this TV doesn't have yet, playlists whose address
             // or login changed on the other TV, and rebuild the guide.
-            if (liveData(before).toString() != liveData(after).toString()) repository.reloadAfterSync(changed)
+            if (liveData(before).toString() != liveData(after).toString()) repository.get().reloadAfterSync(changed)
             delay(500)
         } finally {
             applying = false
@@ -536,15 +539,26 @@ class LiveTvDriveSync @Inject constructor(
         }
     }
 
-    /** v2 media responses include the ETag required for a conditional v2 upload. */
+    /** Drive uses different ETags for media downloads and file updates. */
     private suspend fun remoteCopy(token: String): RemoteBackup? {
         val fileId = fileId(token) ?: return null
-        val (text, etag) = executeVersioned(
+        val metadataRequest = Request.Builder()
+            .url("https://www.googleapis.com/drive/v2/files/$fileId?fields=id,etag")
+            .header("Authorization", "Bearer $token")
+            .get().build()
+        val etag = JSONObject(execute(metadataRequest)).getString("etag")
+        check(etag.isNotBlank()) { "Backup version could not be verified. Nothing was overwritten." }
+        val text = execute(
             Request.Builder()
                 .url("https://www.googleapis.com/drive/v2/files/$fileId?alt=media")
                 .header("Authorization", "Bearer $token")
                 .get().build()
         )
+        // Media If-Match compares a different tag, so verify the resource version on both sides
+        // of the download. The upload also uses If-Match to reject any subsequent edit.
+        check(JSONObject(execute(metadataRequest)).getString("etag") == etag) {
+            "The backup changed on another TV. Sync again before saving."
+        }
         return RemoteBackup(JSONObject(text), etag)
     }
 
@@ -775,15 +789,13 @@ class LiveTvDriveSync @Inject constructor(
         }
     }
 
-    private suspend fun execute(request: Request): String = executeVersioned(request).first
-
-    private suspend fun executeVersioned(request: Request): Pair<String, String?> = withContext(Dispatchers.IO) {
+    private suspend fun execute(request: Request): String = withContext(Dispatchers.IO) {
         http.newCall(request).execute().use { r ->
             val text = r.body?.string().orEmpty()
             if (r.code == 404) store.edit().remove(KEY_FILE_ID).apply()
             if (r.code == 412) error("The backup changed on another TV. Sync again before saving.")
             if (!r.isSuccessful) error("HTTP ${r.code}")
-            text to r.header("ETag")
+            text
         }
     }
 

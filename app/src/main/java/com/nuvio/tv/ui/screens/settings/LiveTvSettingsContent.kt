@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
@@ -46,7 +45,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.size
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -203,7 +201,6 @@ private sealed interface LiveDialog {
     data object SortChoice : LiveDialog
     data object HighlightChoice : LiveDialog
     data object CustomGroups : LiveDialog
-    data object ConfirmRestore : LiveDialog
     data object PinCheck : LiveDialog
     data object PinNew : LiveDialog
     data object PinRemove : LiveDialog
@@ -286,7 +283,6 @@ internal fun LiveTvSettingsContent(
     val status by viewModel.status.collectAsStateWithLifecycle()
     val accounts by viewModel.accounts.collectAsStateWithLifecycle()
     var dialog by remember { mutableStateOf<LiveDialog?>(null) }
-    val drive by viewModel.driveSync.state.collectAsStateWithLifecycle()
     val developerToolsOn by com.nuvio.tv.livetv.model.DeveloperTools.enabled.collectAsStateWithLifecycle()
     val onDemandHas by viewModel.onDemand.hasContent.collectAsStateWithLifecycle()
     val onDemandStatus by viewModel.onDemand.status.collectAsStateWithLifecycle()
@@ -337,33 +333,6 @@ internal fun LiveTvSettingsContent(
             contentPadding = PaddingValues(bottom = 18.dp),
             verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)
         ) {
-            // ------------------------------------------------------------ Backup & Sync
-            if (show(LiveTvPage.MAIN)) item(key = "drive") {
-                DriveSyncCard(
-                    modifier = if (firstRequester != null) Modifier.focusRequester(firstRequester) else Modifier,
-                    state = drive,
-                    expanded = "drive" in open,
-                    onToggleExpanded = { toggle("drive") },
-                    onConnect = { viewModel.driveSync.beginSignIn() },
-                    onAutoSync = { viewModel.driveSync.setAutoSync(it) },
-                    onBackUp = {
-                        confirm(
-                            "Back up now?",
-                            "The copy in your Google Drive is replaced with this TV's Live TV setup.",
-                            "Back Up"
-                        ) { viewModel.driveSync.backUpNow() }
-                    },
-                    onRestore = { dialog = LiveDialog.ConfirmRestore },
-                    onDisconnect = {
-                        confirm(
-                            "Disconnect Google Drive?",
-                            "This TV stops syncing. Your backup stays in your Google Drive.",
-                            "Disconnect"
-                        ) { viewModel.driveSync.disconnect() }
-                    }
-                )
-            }
-
             // ------------------------------------------------------------ Playlists & Guides
             if (show(LiveTvPage.MAIN)) item(key = "sources") {
                 LiveSection(
@@ -372,7 +341,9 @@ internal fun LiveTvSettingsContent(
                     else "${playlists.size} ${if (playlists.size == 1) "playlist" else "playlists"} · ${epgs.size} ${if (epgs.size == 1) "guide" else "guides"}",
                     icon = Icons.AutoMirrored.Filled.PlaylistPlay,
                     open = "sources" in open,
-                    onToggle = { toggle("sources") }
+                    onToggle = { toggle("sources") },
+                    modifier = if (firstRequester != null) Modifier.focusRequester(firstRequester) else Modifier,
+                    focusFirst = firstFocus(LiveTvPage.MAIN)
                 ) {
                     SubHeading("Playlists")
                     if (status.loading) LoadingLine(status.message ?: "Updating…")
@@ -1558,9 +1529,7 @@ internal fun LiveTvSettingsContent(
         } // key(page)
     }
 
-    drive.signIn?.let { prompt ->
-        DriveSignInDialog(prompt = prompt, onCancel = { viewModel.driveSync.cancelSignIn() })
-    }
+
 
     // ---------------------------------------------------------------- dialogs
     val close = { dialog = null }
@@ -1804,23 +1773,6 @@ internal fun LiveTvSettingsContent(
             onConfirm = { d.action(); close() },
             confirmLabel = d.label
         )
-        LiveDialog.ConfirmRestore -> {
-            // When the saved copy was made, and on which TV: restoring an old copy puts back old
-            // playlists and logins (a provider's old address, an old password).
-            var loaded by remember { mutableStateOf(false) }
-            var info by remember { mutableStateOf<com.nuvio.tv.livetv.sync.LiveTvDriveSync.BackupInfo?>(null) }
-            LaunchedEffect(Unit) {
-                info = runCatching { viewModel.driveSync.backupInfo() }.getOrNull()
-                loaded = true
-            }
-            ConfirmDeleteDialog(
-                title = "Restore from Google Drive?",
-                message = restoreMessage(loaded, info, viewModel.driveSync.localChangedAt()),
-                onDismiss = close,
-                onConfirm = { viewModel.driveSync.restoreNow(); close() },
-                confirmLabel = "Restore"
-            )
-        }
         is LiveDialog.ConfirmDeletePlaylist -> ConfirmDeleteDialog(
             title = "Delete \"${d.source.name}\"?",
             message = "Its ${d.source.channelCount} channels leave the guide. Favorites, hidden channels and EPG assignments for them are kept in case you add it back.",
@@ -2011,130 +1963,6 @@ private fun LoadingLine(message: String) {
     }
 }
 
-// ==================================================================== Google Drive sync
-
-/** Collapsed to one line until selected; then shows sign-in, backup and restore. */
-@Composable
-private fun DriveSyncCard(
-    modifier: Modifier = Modifier,
-    state: com.nuvio.tv.livetv.sync.DriveSyncState,
-    expanded: Boolean,
-    onToggleExpanded: () -> Unit,
-    onConnect: () -> Unit,
-    onAutoSync: (Boolean) -> Unit,
-    onBackUp: () -> Unit,
-    onRestore: () -> Unit,
-    onDisconnect: () -> Unit
-) {
-    val status = when {
-        !state.available -> "Not available in this build"
-        !state.connected -> "Off"
-        state.busy -> "Syncing…"
-        state.lastSyncMs > 0 -> "On · last synced " + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(state.lastSyncMs))
-        else -> "On"
-    }
-    LiveSection(
-        title = "Backup & Sync",
-        summary = "Google Drive · " + status,
-        icon = Icons.Default.Backup,
-        open = expanded,
-        onToggle = onToggleExpanded,
-        modifier = modifier
-    ) {
-        run {
-            when {
-                !state.available -> Text(
-                    text = "Google Drive sync needs to be set up by whoever builds this app.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = NuvioTheme.colors.TextSecondary
-                )
-                !state.connected -> {
-                    Text(
-                        text = "Your playlists, guide settings, Sports Hub preferences and per-profile TVDB order and Shuffle choices are saved privately in your Google Drive. Backups include playlist logins, so keep the backup private. Personal API keys and tracker sign-ins are not included.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = NuvioTheme.colors.TextSecondary
-                    )
-                    SettingsActionRow("Connect Google Drive", "Keeps your Live TV setup the same on every TV, using your own Google Drive. Sign in with a code on your phone.", onClick = onConnect)
-                }
-                else -> {
-                    SettingsActionRow("Account", "The Google account your Live TV setup is saved to", state.email ?: "Connected", onClick = {})
-                    SettingsToggleRow(
-                        "Sync Automatically",
-                        "Back up changes, and pick up changes made on your other TVs",
-                        state.autoSync,
-                        { onAutoSync(!state.autoSync) }
-                    )
-                    SettingsActionRow("Back Up Now", "Save this TV's setup to Google Drive", onClick = onBackUp)
-                    SettingsActionRow("Restore from Google Drive", "Replace this TV's setup with the saved copy", onClick = onRestore)
-                    SettingsActionRow("Disconnect", "Stop syncing on this TV (your backup stays in Drive)", onClick = onDisconnect)
-                }
-            }
-            state.message?.let {
-                Text(text = it, style = MaterialTheme.typography.bodySmall, color = NuvioTheme.colors.TextSecondary)
-            }
-        }
-    }
-}
-
-@Composable
-private fun DriveSignInDialog(prompt: com.nuvio.tv.livetv.sync.SignInPrompt, onCancel: () -> Unit) {
-    val cancelFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        delay(80)
-        runCatching { cancelFocus.requestFocus() }
-    }
-    // Same layout as Nuvio's other QR sign-ins (debrid, Simkl): instructions, QR code, then the code.
-    val qrBitmap = remember(prompt.qrUrl) {
-        runCatching { com.nuvio.tv.core.qr.QrCodeGenerator.generate(prompt.qrUrl, 420, margin = 1) }.getOrNull()
-    }
-    val shortUrl = prompt.url.removePrefix("https://").removePrefix("http://")
-    NuvioDialog(onDismiss = onCancel, title = "Connect Google Drive", width = 560.dp) {
-        Text(
-            text = "Scan the QR code with your phone, or go to $shortUrl, then enter the code below and allow access.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = NuvioTheme.colors.TextSecondary,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        if (qrBitmap != null) {
-            androidx.compose.foundation.Image(
-                bitmap = qrBitmap.asImageBitmap(),
-                contentDescription = "QR code",
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .size(196.dp),
-                contentScale = androidx.compose.ui.layout.ContentScale.Fit
-            )
-        }
-        Text(
-            text = prompt.userCode,
-            style = MaterialTheme.typography.displaySmall,
-            color = NuvioTheme.colors.Secondary,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Text(
-            text = shortUrl,
-            style = MaterialTheme.typography.titleMedium,
-            color = NuvioTheme.colors.TextPrimary,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Text(
-            text = "Waiting for you to allow access… this screen continues by itself.",
-            style = MaterialTheme.typography.bodySmall,
-            color = NuvioTheme.colors.TextSecondary,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        SettingsDialogActionRow(horizontalAlignment = Alignment.CenterHorizontally) {
-            androidx.compose.foundation.layout.Box(Modifier.focusRequester(cancelFocus)) {
-                SettingsDialogActionButton(text = "Cancel", onClick = onCancel)
-            }
-        }
-    }
-}
-
 // ==================================================================== dialogs
 
 private data class FormField(val label: String, val hint: String, val initial: String = "")
@@ -2262,7 +2090,7 @@ private fun ActionListDialog(
 }
 
 @Composable
-private fun ConfirmDeleteDialog(
+internal fun ConfirmDeleteDialog(
     title: String,
     message: String,
     onDismiss: () -> Unit,
@@ -2285,33 +2113,6 @@ private fun ConfirmDeleteDialog(
     }
 }
 
-/** The restore prompt's text: what's replaced, when the saved copy was made and where, and a warning when it's old. */
-private fun restoreMessage(loaded: Boolean, info: com.nuvio.tv.livetv.sync.LiveTvDriveSync.BackupInfo?, localChangedAt: Long): String {
-    val base = "This TV's Live TV setup, Sports Hub preferences and saved TVDB episode orders and Shuffle choices are replaced with the copy in Google Drive. Profiles must match; personal API keys and tracker sign-ins are kept on this TV."
-    if (!loaded) return "$base\n\nChecking when it was saved…"
-    if (info == null || info.savedAtMs <= 0L) return base
-    val now = System.currentTimeMillis()
-    val days = ((now - info.savedAtMs) / (24 * 60 * 60_000L)).toInt()
-    val ago = when {
-        now - info.savedAtMs < 60 * 60_000L -> "less than an hour ago"
-        days < 1 -> "today"
-        days == 1 -> "yesterday"
-        days < 14 -> "$days days ago"
-        days < 60 -> "${days / 7} weeks ago"
-        else -> "${days / 30} months ago"
-    }
-    val stamp = java.text.SimpleDateFormat("EEE d MMM, h:mm a", java.util.Locale.getDefault()).format(java.util.Date(info.savedAtMs))
-    val where = if (info.fromThisTv) "this TV" else info.device
-    val saved = "Saved $stamp on $where ($ago)."
-    val warning = when {
-        localChangedAt > info.savedAtMs + 60_000L ->
-            "This TV has changes made after that copy was saved. Restoring puts back the older playlists and logins. If this TV has the latest, press Back Up Now here instead."
-        days >= 7 ->
-            "That copy is $ago. If your playlists or logins have changed since (a new server address or password), press Back Up Now on a TV that has the latest first."
-        else -> null
-    }
-    return listOfNotNull(base, saved, warning).joinToString("\n\n")
-}
 
 @Composable
 private fun UnhideDialog(
@@ -2367,7 +2168,7 @@ private fun UnhideDialog(
  * section's icon, name and a one-line summary; OK opens or closes it.
  */
 @Composable
-private fun LiveSection(
+internal fun LiveSection(
     title: String,
     summary: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
