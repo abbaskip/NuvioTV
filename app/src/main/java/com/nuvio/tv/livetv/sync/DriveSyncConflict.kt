@@ -28,7 +28,9 @@ internal object DriveSyncConflict {
                         }
                     }
                 }
-            } else conflict(base.opt(key), local.opt(key), remote.opt(key))
+            } else if (mergedDriveSet(base.optJSONObject(key), local.optJSONObject(key), remote.optJSONObject(key)) == null) {
+                conflict(base.opt(key), local.opt(key), remote.opt(key))
+            }
         }
     }
 

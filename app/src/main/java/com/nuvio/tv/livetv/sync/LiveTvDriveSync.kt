@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -55,8 +56,8 @@ data class SignInPrompt(val userCode: String, val url: String, val qrUrl: String
 /**
  * Syncs the Live TV setup through the user's own Google Drive.
  *
- * The data goes in Drive's hidden app data folder (scope drive.appdata): it lives in the user's
- * Drive, only this app can read it, and nothing is stored anywhere else. Sign-in uses Google's
+ * Uses the private app folder when Google permits it, otherwise an app-created private Drive
+ * file (drive.file). Backups contain playlist credentials and are never shared by the app. Sign-in uses Google's
  * "TVs and limited input devices" flow: the TV shows a code, the user approves on their phone.
  * Changes use a three-way merge; conflicting edits stop sync until explicitly resolved.
  * Restore is explicit. Automatic sync never replaces a setup based only on device clocks.
@@ -136,7 +137,7 @@ class LiveTvDriveSync @Inject constructor(
             val fileId = fileId(token) ?: return@runCatching null
             val json = JSONObject(execute(
                 Request.Builder()
-                    .url("https://www.googleapis.com/drive/v3/files/$fileId?alt=media")
+                    .url("https://www.googleapis.com/drive/v2/files/$fileId?alt=media")
                     .header("Authorization", "Bearer $token")
                     .get()
                     .build()
@@ -164,7 +165,7 @@ class LiveTvDriveSync @Inject constructor(
     /** Starts automatic sync: check Drive for a newer setup, then back up local changes. */
     @Synchronized
     fun start() {
-        if (started) return
+        if (started || !_state.value.connected) return
         started = true
         scope.launch {
             if (_state.value.connected && _state.value.autoSync) pull(force = false)
@@ -194,6 +195,7 @@ class LiveTvDriveSync @Inject constructor(
 
     private fun setupChanges() = kotlinx.coroutines.flow.merge(
         prefs.changes,
+        profiles.profilesList.map { Unit },
         * (1..com.nuvio.tv.core.profile.ProfileManager.MAX_PROFILES).map(orders::selectionChanges).toTypedArray()
     )
 
@@ -248,7 +250,12 @@ class LiveTvDriveSync @Inject constructor(
                 when (token.optString("error")) {
                     "" -> {
                         store.edit().putString(KEY_MODE, mode).apply()
-                        onSignedIn(token)
+                        try { onSignedIn(token) }
+                        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (_: Exception) {
+                            _state.value = _state.value.copy(signIn = null, busy = false,
+                                message = "Could not finish Google Drive sign-in. Try connecting again.")
+                        }
                         return@launch
                     }
                     "authorization_pending" -> Unit
@@ -273,6 +280,12 @@ class LiveTvDriveSync @Inject constructor(
     }
 
     private suspend fun onSignedIn(token: JSONObject) {
+        val requiredScope = "https://www.googleapis.com/auth/drive." + if (isAppDataMode) "appdata" else "file"
+        if (requiredScope !in token.optString("scope").split(' ')) {
+            _state.value = _state.value.copy(signIn = null, busy = false,
+                message = "Google sign-in did not grant Drive access. Connect again and allow the Drive permission.")
+            return
+        }
         val refresh = token.optString("refresh_token")
         if (refresh.isBlank()) {
             _state.value = _state.value.copy(signIn = null, message = "Google didn't return a sign-in. Try again.")
@@ -282,21 +295,30 @@ class LiveTvDriveSync @Inject constructor(
         accessTokenExpiresAt = System.currentTimeMillis() + token.optLong("expires_in", 3600) * 1000
         val email = emailFromIdToken(token.optString("id_token"))
         protected.write(1, refresh)
-        store.edit().remove(KEY_REFRESH).putString(KEY_EMAIL, email).apply()
+        // An explicit sign-in may be a different Google account. Never reuse its predecessor's baseline.
+        android.util.AtomicFile(baseFile()).delete()
+        store.edit().remove(KEY_REFRESH).remove(KEY_FILE_ID).remove(KEY_LAST_HASH).putString(KEY_EMAIL, email).apply()
         _state.value = _state.value.copy(connected = true, email = email, signIn = null, message = null)
         // First connection merges with Drive; it must not replace an existing local setup.
         push(force = true)
+        start()
     }
 
     fun disconnect() {
-        val refresh = refreshToken()
-        store.edit().remove(KEY_REFRESH).remove(KEY_EMAIL).remove(KEY_FILE_ID).remove(KEY_LAST_HASH).remove(KEY_MODE).apply()
-        runCatching { baseFile().delete() }
-        protected.clear()
-        accessToken = null
-        _state.value = _state.value.copy(connected = false, email = null, message = "Disconnected. Your backup stays in your Google Drive.")
-        if (refresh != null) scope.launch {
-            runCatching { postForm("https://oauth2.googleapis.com/revoke", mapOf("token" to refresh)) }
+        cancelSignIn()
+        scope.launch {
+            mutex.withLock {
+                store.edit().remove(KEY_REFRESH).remove(KEY_EMAIL).remove(KEY_FILE_ID).remove(KEY_LAST_HASH)
+                    .remove(KEY_MODE).remove(KEY_LAST_SYNC).remove(KEY_APPLIED_AT).apply()
+                android.util.AtomicFile(baseFile()).delete()
+                protected.clear()
+                accessToken = null
+                accessTokenExpiresAt = 0L
+                _state.value = _state.value.copy(connected = false, email = null, busy = false, lastSyncMs = 0L,
+                    message = "Disconnected on this TV. Your backup stays in your Google Drive.")
+                // Google's revoke endpoint invalidates this user's grant on the other TVs too.
+                // Disconnect is local; full revocation remains in Google Account permissions.
+            }
         }
     }
 
@@ -329,9 +351,9 @@ class LiveTvDriveSync @Inject constructor(
             var expectedEtag: String? = null
             remoteCopy(token)?.let { remote ->
                 expectedEtag = remote.etag
-                val remoteData = remote.json.optJSONObject("data")
+                val remoteData = driveBackupData(remote.json)
                 val base = readBase()
-                if (remoteData != null && remoteData.toString() != base?.toString()) {
+                if (remoteData.toString() != base?.toString()) {
                     val merged = merge(base, local = data, remote = remoteData, localWinsWithoutBase = true, removedHere = removedHere)
                     if (merged.toString() != data.toString()) applyLocally(merged)
                     data = merged
@@ -371,10 +393,10 @@ class LiveTvDriveSync @Inject constructor(
             } else {
                 execute(
                     Request.Builder()
-                        .url("https://www.googleapis.com/upload/drive/v3/files/$fileId?uploadType=media")
+                        .url("https://www.googleapis.com/upload/drive/v2/files/$fileId?uploadType=media")
                         .header("Authorization", "Bearer $token")
                         .header("If-Match", checkNotNull(expectedEtag) { "Backup version could not be verified. Nothing was overwritten." })
-                        .patch(body.toRequestBody(JSON))
+                        .put(body.toRequestBody(JSON))
                         .build()
                 )
             }
@@ -407,7 +429,7 @@ class LiveTvDriveSync @Inject constructor(
             val fileId = fileId(token) ?: return@runCatching null
             val text = execute(
                 Request.Builder()
-                    .url("https://www.googleapis.com/drive/v3/files/$fileId?alt=media")
+                    .url("https://www.googleapis.com/drive/v2/files/$fileId?alt=media")
                     .header("Authorization", "Bearer $token")
                     .get()
                     .build()
@@ -415,7 +437,7 @@ class LiveTvDriveSync @Inject constructor(
             val json = JSONObject(text)
             val savedAt = json.optLong("savedAt")
             val fromThisTv = json.optString("deviceId") == deviceId
-            val remoteData = json.optJSONObject("data") ?: return@runCatching false
+            val remoteData = driveBackupData(json)
             // Nothing new: saved by this TV, or the same as what this TV last synced. (Not judged
             // by the time it was saved: TVs' clocks differ, and a newer copy was skipped.)
             val base = readBase()
@@ -459,6 +481,7 @@ class LiveTvDriveSync @Inject constructor(
         applying = true
         appliedAtMs = System.currentTimeMillis()
         try {
+            driveBackupData(JSONObject().put("format", 1).put("data", data))
             val before = exportSetup()
             val selections = if (data.has(TVDB_VERSION)) (1..com.nuvio.tv.core.profile.ProfileManager.MAX_PROFILES).associateWith { id ->
                 data.keys().asSequence().filter { it.startsWith("$TVDB_PREFIX$id:") }.associate {
@@ -467,9 +490,11 @@ class LiveTvDriveSync @Inject constructor(
             } else emptyMap()
             selections.values.forEach { com.nuvio.tv.data.tvdb.validateTvdbSelections(it) }
             val localProfiles = profiles.profilesList.first().associateBy { it.id }
-            selections.filterValues { it.isNotEmpty() }.forEach { (id, _) ->
+            val profileIds = selections.filterValues { it.isNotEmpty() }.keys + data.keys().asSequence()
+                .filter { it.startsWith(PROFILE_PREFIX) }.map { it.removePrefix(PROFILE_PREFIX).toInt() }.toSet()
+            profileIds.forEach { id ->
                 check(data.optJSONObject("$PROFILE_PREFIX$id")?.optString("v") == localProfiles[id]?.name) {
-                    "Backup profiles differ from this TV. Restore the matching Nuvio profiles before restoring their TVDB choices."
+                    "Backup profiles differ from this TV. Create or restore matching Nuvio profiles (same IDs and names) before restoring this setup."
                 }
             }
             val changed = prefs.importFromSync(liveData(data))
@@ -494,12 +519,12 @@ class LiveTvDriveSync @Inject constructor(
         }
     }
 
-    /** The Drive copy, or null if there isn't one or it can't be read. */
+    /** v2 media responses include the ETag required for a conditional v2 upload. */
     private suspend fun remoteCopy(token: String): RemoteBackup? {
         val fileId = fileId(token) ?: return null
         val (text, etag) = executeVersioned(
             Request.Builder()
-                .url("https://www.googleapis.com/drive/v3/files/$fileId?alt=media")
+                .url("https://www.googleapis.com/drive/v2/files/$fileId?alt=media")
                 .header("Authorization", "Bearer $token")
                 .get().build()
         )
@@ -548,6 +573,10 @@ class LiveTvDriveSync @Inject constructor(
             base.keys().forEach { add(it) }
         }
         keys.forEach { k ->
+            mergedDriveSet(base.optJSONObject(k), local.optJSONObject(k), remote.optJSONObject(k))?.let {
+                out.put(k, it)
+                return@forEach
+            }
             val l = local.opt(k)?.toString()
             val b = base.opt(k)?.toString()
             if (l != b) {
@@ -661,7 +690,10 @@ class LiveTvDriveSync @Inject constructor(
 
     /** A valid access token, refreshed when needed. Null (and disconnected) if sign-in was revoked. */
     private suspend fun token(): String? {
-        val refresh = refreshToken() ?: return null
+        val refresh = refreshToken() ?: run {
+            _state.value = _state.value.copy(connected = false, message = "Connect Google Drive to keep syncing.")
+            return null
+        }
         accessToken?.let { if (System.currentTimeMillis() < accessTokenExpiresAt - 60_000) return it }
         val res = runCatching {
             postForm(
@@ -688,7 +720,7 @@ class LiveTvDriveSync @Inject constructor(
         if (res.optString("error") == "invalid_grant") {
             protected.clear()
             store.edit().remove(KEY_REFRESH).apply()
-            _state.value = _state.value.copy(connected = false, message = "Google Drive access was removed. Connect again to keep syncing.")
+            _state.value = _state.value.copy(connected = false, message = "Google Drive sign-in expired or access was removed. Connect again to keep syncing.")
             return null
         }
         val access = res.optString("access_token").ifBlank { return null }
