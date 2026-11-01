@@ -180,8 +180,8 @@ android {
         buildConfigField("String", "SENTRY_DSN", buildConfigString(sentryDsn))
 
         // In-app updater (GitHub Releases)
-        buildConfigField("String", "GOOGLE_DRIVE_CLIENT_ID", "\"\"")
-        buildConfigField("String", "GOOGLE_DRIVE_CLIENT_SECRET", "\"\"")
+        buildConfigField("String", "GOOGLE_DRIVE_CLIENT_ID", buildConfigString(resolveProperty(devProperties, localProperties, "GOOGLE_DRIVE_CLIENT_ID", System.getenv("GOOGLE_DRIVE_CLIENT_ID") ?: "")))
+        buildConfigField("String", "GOOGLE_DRIVE_CLIENT_SECRET", buildConfigString(resolveProperty(devProperties, localProperties, "GOOGLE_DRIVE_CLIENT_SECRET", System.getenv("GOOGLE_DRIVE_CLIENT_SECRET") ?: "")))
         buildConfigField("String", "GITHUB_OWNER", "\"abbaskip\"")
         buildConfigField("String", "GITHUB_REPO", "\"Nuvio-ReSeq\"")
     }

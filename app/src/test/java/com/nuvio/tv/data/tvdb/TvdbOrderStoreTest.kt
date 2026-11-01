@@ -34,6 +34,46 @@ class TvdbOrderStoreTest {
         assertTrue(recreated.sources(2, 73244).isEmpty())
     }
 
+    @Test fun `backup retains stable order IDs profiles and aliases without playback caches`() = runTest {
+        val store = TvdbOrderStore(factory)
+        store.save(1, 78874, "dvd", listOf("tt0303461"))
+        store.save(2, 78874, "alternate_2", listOf("tmdb:1437"))
+        val one = store.exportSelections(1)
+        val two = store.exportSelections(2)
+        store.save(1, 78874, null, emptyList())
+        store.importSelections(1, one)
+        assertEquals("dvd", store.selected(1, listOf("tt0303461"))?.orderType)
+        assertEquals("alternate_2", store.selected(2, listOf("tmdb:1437"))?.orderType)
+        assertFalse(one.keys.any { it.startsWith("sources:") })
+        assertNotEquals(one, two)
+    }
+
+    @Test fun `restore keeps unavailable orders but rejects malformed data before changing preferences`() = runTest {
+        val store = TvdbOrderStore(factory)
+        store.importSelections(1, mapOf("order:78874" to "unavailable_order", "alias:tt0303461" to "78874"))
+        try {
+            store.importSelections(1, mapOf("order:78874" to "bad/order"))
+            fail("Malformed order accepted")
+        } catch (_: IllegalArgumentException) { }
+        assertEquals("unavailable_order", store.selected(1, listOf("tt0303461"))?.orderType)
+        store.importSelections(1, emptyMap())
+        assertNull(store.selected(1, listOf("tt0303461")))
+    }
+
+    @Test fun `explicit default reset travels but a fresh install exports no deletion`() = runTest {
+        val store = TvdbOrderStore(factory)
+        assertTrue(store.exportSelections(1).isEmpty())
+        store.save(1, 78874, "dvd", listOf("tt0303461"))
+        store.save(1, 78874, null, listOf("tt0303461"))
+        val reset = store.exportSelections(1)
+        assertEquals("true", reset["reset:78874"])
+        assertFalse(reset.containsKey("order:78874"))
+        store.importSelections(2, reset)
+        assertNull(store.selected(2, listOf("tt0303461")))
+        store.save(1, 78874, "dvd", listOf("tt0303461"))
+        assertFalse(store.exportSelections(1).containsKey("reset:78874"))
+    }
+
     private class Memory : DataStore<Preferences> {
         override val data = MutableStateFlow(emptyPreferences())
         override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =

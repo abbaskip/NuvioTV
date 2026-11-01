@@ -55,6 +55,35 @@ class TvdbOrderStore @Inject constructor(private val factory: ProfileDataStoreFa
         prefs.asMap().keys.mapNotNull { key -> key.name.takeIf { it.startsWith("order:") }?.substringAfter(':')?.toLongOrNull() }.toSet()
     }.distinctUntilChanged()
 
+    /** Only durable user choices and their aliases; never credentials or learned playback caches. */
+    suspend fun exportSelections(profileId: Int): Map<String, String> {
+        val prefs = factory.get(profileId, "tvdb_orders").data.first()
+        val orders = prefs.asMap().filterKeys { (it.name.startsWith("order:") || it.name.startsWith("reset:")) }
+        val selected = orders.keys.map { it.name.substringAfter(':') }.toSet()
+        return prefs.asMap().filter { (key, value) ->
+            key in orders || key.name.startsWith("alias:") && value.toString() in selected
+        }.mapKeys { it.key.name }.mapValues { it.value.toString() }
+    }
+
+    fun selectionChanges(profileId: Int) = factory.get(profileId, "tvdb_orders").data.map { prefs ->
+        prefs.asMap().filterKeys { it.name.startsWith("order:") || it.name.startsWith("reset:") || it.name.startsWith("alias:") }
+    }.distinctUntilChanged().map { Unit }
+
+    suspend fun importSelections(profileId: Int, values: Map<String, String>) {
+        require(profileId in 1..com.nuvio.tv.core.profile.ProfileManager.MAX_PROFILES)
+        validateTvdbSelections(values)
+        factory.get(profileId, "tvdb_orders").edit { prefs ->
+            prefs.asMap().keys.filter { it.name.startsWith("order:") || it.name.startsWith("reset:") }.forEach {
+                @Suppress("UNCHECKED_CAST")
+                prefs.remove(it as androidx.datastore.preferences.core.Preferences.Key<Any>)
+            }
+            values.forEach { (key, value) ->
+                if (key.startsWith("alias:")) prefs[longPreferencesKey(key)] = value.toLong()
+                else prefs[stringPreferencesKey(key)] = value
+            }
+        }.also { snapshots[profileId] = it }
+    }
+
     suspend fun sources(profileId: Int, seriesId: Long): Map<Long, TvdbSourceReference> =
         decodeSources(factory.get(profileId, "tvdb_orders").data.first()[stringPreferencesKey("sources:$seriesId")])
 
@@ -119,7 +148,13 @@ class TvdbOrderStore @Inject constructor(private val factory: ProfileDataStoreFa
         require(order == null || order.matches(Regex("[A-Za-z0-9_-]+")))
         factory.get(profileId, "tvdb_orders").edit { prefs ->
             val key = stringPreferencesKey("order:$seriesId")
-            if (order == null) prefs.remove(key) else prefs[key] = order
+            if (order == null) {
+                prefs.remove(key)
+                prefs[stringPreferencesKey("reset:$seriesId")] = "true"
+            } else {
+                prefs[key] = order
+                prefs.remove(stringPreferencesKey("reset:$seriesId"))
+            }
             aliases.filter(String::isNotBlank).forEach { prefs[longPreferencesKey("alias:$it")] = seriesId }
         }.also { snapshots[profileId] = it }
     }
@@ -137,3 +172,17 @@ private fun decodeSources(raw: String?): Map<Long, TvdbSourceReference> = try {
             (value["coverage"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.longOrNull?.takeIf { id -> id > 0 } })
     }.toMap()
 } catch (_: Exception) { emptyMap() }
+
+internal fun validateTvdbSelections(values: Map<String, String>) {
+    values.forEach { (key, value) ->
+        val valid = when {
+            key.startsWith("order:") -> key.substringAfter(':').toLongOrNull()?.let { it > 0 } == true &&
+                value.matches(Regex("[A-Za-z0-9_-]+")) && "reset:${key.substringAfter(':')}" !in values
+            key.startsWith("reset:") -> key.substringAfter(':').toLongOrNull()?.let { it > 0 } == true && value == "true"
+            key.startsWith("alias:") -> key.length > 6 && value.toLongOrNull()?.let { it > 0 } == true &&
+                ("order:$value" in values || "reset:$value" in values)
+            else -> false
+        }
+        require(valid) { "Invalid TVDB order backup" }
+    }
+}

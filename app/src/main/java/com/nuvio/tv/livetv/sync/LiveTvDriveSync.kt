@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -57,18 +58,51 @@ data class SignInPrompt(val userCode: String, val url: String, val qrUrl: String
  * The data goes in Drive's hidden app data folder (scope drive.appdata): it lives in the user's
  * Drive, only this app can read it, and nothing is stored anywhere else. Sign-in uses Google's
  * "TVs and limited input devices" flow: the TV shows a code, the user approves on their phone.
- * Sync is "newest wins": changes are backed up shortly after they happen, and a newer copy from
- * another TV is applied when the app starts or when you tap Restore.
+ * Changes use a three-way merge; conflicting edits stop sync until explicitly resolved.
+ * Restore is explicit. Automatic sync never replaces a setup based only on device clocks.
  */
 @Singleton
 class LiveTvDriveSync @Inject constructor(
     @ApplicationContext private val context: Context,
     private val prefs: LiveTvPreferences,
-    private val repository: LiveTvRepository
+    private val repository: LiveTvRepository,
+    private val orders: com.nuvio.tv.data.tvdb.TvdbOrderStore,
+    private val profiles: com.nuvio.tv.data.local.ProfileDataStore
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val store = context.applicationContext.getSharedPreferences("livetv_drive_sync", Context.MODE_PRIVATE)
+    private val protected = com.nuvio.tv.core.profile.ProtectedProfilePreferences(
+        context, "reseq_drive_credentials", "com.nuvio.tv.drive.credentials.v1")
     private val mutex = Mutex()
+    private data class RemoteBackup(val json: JSONObject, val etag: String?)
+
+    private fun refreshToken(): String? {
+        protected.read(1)?.let { return it }
+        return store.getString(KEY_REFRESH, null)?.also {
+            protected.write(1, it)
+            check(store.edit().remove(KEY_REFRESH).commit())
+        }
+    }
+
+    private suspend fun exportSetup(): JSONObject = prefs.exportForSync().also { data ->
+        data.put(TVDB_VERSION, JSONObject().put("t", "i").put("v", 1))
+        profiles.profilesList.first().forEach { profile ->
+            data.put("$PROFILE_PREFIX${profile.id}", JSONObject().put("t", "str").put("v", profile.name))
+        }
+        for (id in 1..com.nuvio.tv.core.profile.ProfileManager.MAX_PROFILES) {
+            orders.exportSelections(id).forEach { (key, value) ->
+                data.put("$TVDB_PREFIX$id:$key", JSONObject().put("t", "str").put("v", value))
+            }
+        }
+    }
+
+    private fun hasSetup(data: JSONObject?) = prefs.syncHasSources(data) ||
+        data?.keys()?.asSequence()?.any { it.startsWith(TVDB_PREFIX) && (":order:" in it || ":reset:" in it) } == true
+
+    private fun liveData(data: JSONObject) = JSONObject(data.toString()).also { out ->
+        out.keys().asSequence().filter { it == TVDB_VERSION || it.startsWith(TVDB_PREFIX) || it.startsWith(PROFILE_PREFIX) }.toList().forEach(out::remove)
+    }
+
     private val http = OkHttpClient.Builder()
         // IPv4 first, like Nuvio's own connections: many VPNs (and some routers) leave IPv6
         // half working, and each Google address then hung until it timed out.
@@ -121,7 +155,7 @@ class LiveTvDriveSync @Inject constructor(
 
     private fun loadState() = DriveSyncState(
         available = clientId.isNotBlank() && clientSecret.isNotBlank(),
-        connected = store.getString(KEY_REFRESH, null) != null,
+        connected = store.contains(KEY_REFRESH) || context.getSharedPreferences("reseq_drive_credentials", Context.MODE_PRIVATE).contains("profile.1"),
         email = store.getString(KEY_EMAIL, null),
         autoSync = store.getBoolean(KEY_AUTO, true),
         lastSyncMs = store.getLong(KEY_LAST_SYNC, 0L)
@@ -135,21 +169,33 @@ class LiveTvDriveSync @Inject constructor(
         scope.launch {
             if (_state.value.connected && _state.value.autoSync) pull(force = false)
         }
+        // Poll only while the app process is alive; edits are still debounced below.
+        scope.launch {
+            while (true) {
+                delay(TimeUnit.MINUTES.toMillis(15))
+                if (_state.value.connected && _state.value.autoSync) pull(force = false)
+            }
+        }
         // When this TV's own setup last changed (not by a restore or sync): the restore prompt
         // warns when the saved copy is older than that.
         scope.launch {
-            prefs.changes.drop(1).collect {
+            setupChanges().drop(1).collect {
                 val now = System.currentTimeMillis()
                 if (!applying && now - appliedAtMs > 20_000) store.edit().putLong(KEY_LOCAL_CHANGED_AT, now).apply()
             }
         }
         scope.launch {
-            prefs.changes.drop(1).debounce(8_000).collect {
+            setupChanges().drop(1).debounce(8_000).collect {
                 val s = _state.value
                 if (s.connected && s.autoSync && !applying) push(force = false)
             }
         }
     }
+
+    private fun setupChanges() = kotlinx.coroutines.flow.merge(
+        prefs.changes,
+        * (1..com.nuvio.tv.core.profile.ProfileManager.MAX_PROFILES).map(orders::selectionChanges).toTypedArray()
+    )
 
     // ------------------------------------------------------------------ sign-in
 
@@ -235,16 +281,18 @@ class LiveTvDriveSync @Inject constructor(
         accessToken = token.optString("access_token")
         accessTokenExpiresAt = System.currentTimeMillis() + token.optLong("expires_in", 3600) * 1000
         val email = emailFromIdToken(token.optString("id_token"))
-        store.edit().putString(KEY_REFRESH, refresh).putString(KEY_EMAIL, email).apply()
+        protected.write(1, refresh)
+        store.edit().remove(KEY_REFRESH).putString(KEY_EMAIL, email).apply()
         _state.value = _state.value.copy(connected = true, email = email, signIn = null, message = null)
-        // First connection: use the Drive copy if there is one, otherwise back this TV up.
-        if (!pull(force = true, onlyIfExists = true)) push(force = true)
+        // First connection merges with Drive; it must not replace an existing local setup.
+        push(force = true)
     }
 
     fun disconnect() {
-        val refresh = store.getString(KEY_REFRESH, null)
+        val refresh = refreshToken()
         store.edit().remove(KEY_REFRESH).remove(KEY_EMAIL).remove(KEY_FILE_ID).remove(KEY_LAST_HASH).remove(KEY_MODE).apply()
         runCatching { baseFile().delete() }
+        protected.clear()
         accessToken = null
         _state.value = _state.value.copy(connected = false, email = null, message = "Disconnected. Your backup stays in your Google Drive.")
         if (refresh != null) scope.launch {
@@ -269,7 +317,7 @@ class LiveTvDriveSync @Inject constructor(
         emptyRefused = false
         _state.value = _state.value.copy(busy = true, message = if (force) "Backing up…" else null)
         val result = runCatching {
-            var data = prefs.exportForSync()
+            var data = exportSetup()
             val removedHere = prefs.removedSourceIds()
             val hash0 = sha(data.toString())
             if (!force && hash0 == store.getString(KEY_LAST_HASH, null)) return@runCatching false
@@ -278,8 +326,10 @@ class LiveTvDriveSync @Inject constructor(
             // Decided by what's in the copy, not by the TVs' clocks: a TV whose clock ran ahead
             // took the other TVs' newer copy for an older one, skipped it, and then saved over it
             // without the playlists they had added (which then vanished from every TV).
+            var expectedEtag: String? = null
             remoteCopy(token)?.let { remote ->
-                val remoteData = remote.optJSONObject("data")
+                expectedEtag = remote.etag
+                val remoteData = remote.json.optJSONObject("data")
                 val base = readBase()
                 if (remoteData != null && remoteData.toString() != base?.toString()) {
                     val merged = merge(base, local = data, remote = remoteData, localWinsWithoutBase = true, removedHere = removedHere)
@@ -289,7 +339,7 @@ class LiveTvDriveSync @Inject constructor(
             }
             // No playlists and no guides here (signed out, a fresh install, everything removed):
             // never write that over the backup. Automatic sync just skips it; Back up now says why.
-            if (!prefs.syncHasSources(data)) {
+            if (!hasSetup(data)) {
                 if (force) emptyRefused = true
                 return@runCatching false
             }
@@ -323,6 +373,7 @@ class LiveTvDriveSync @Inject constructor(
                     Request.Builder()
                         .url("https://www.googleapis.com/upload/drive/v3/files/$fileId?uploadType=media")
                         .header("Authorization", "Bearer $token")
+                        .header("If-Match", checkNotNull(expectedEtag) { "Backup version could not be verified. Nothing was overwritten." })
                         .patch(body.toRequestBody(JSON))
                         .build()
                 )
@@ -338,7 +389,7 @@ class LiveTvDriveSync @Inject constructor(
             lastSyncMs = store.getLong(KEY_LAST_SYNC, 0L),
             message = when {
                 result.isFailure -> "Backup failed: ${result.exceptionOrNull()?.message ?: "network error"}"
-                emptyRefused -> "Nothing backed up: add a playlist or guide first. Your saved copy in Google Drive was left as it was."
+                emptyRefused -> "Nothing backed up: add a playlist, guide or TVDB order preference first. Your saved copy in Google Drive was left as it was."
                 force -> "Backed up to Google Drive."
                 else -> _state.value.message
             }
@@ -371,11 +422,11 @@ class LiveTvDriveSync @Inject constructor(
             if (!force && (fromThisTv || remoteData.toString() == base?.toString())) return@runCatching false
             // A saved copy with no playlists or guides (made by an older version after signing
             // out): never let it empty this TV. Treated as no backup at all.
-            if (!prefs.syncHasSources(remoteData)) return@runCatching null
+            if (!hasSetup(remoteData)) return@runCatching null
             // "Restore" replaces this TV's setup; automatic sync keeps changes made on this TV
             // since the last sync and takes everything else from the other TV.
             val data = if (force) remoteData
-            else merge(base, local = prefs.exportForSync(), remote = remoteData, localWinsWithoutBase = false, removedHere = prefs.removedSourceIds())
+            else merge(base, local = exportSetup(), remote = remoteData, localWinsWithoutBase = false, removedHere = prefs.removedSourceIds())
             applyLocally(data)
             store.edit()
                 .putLong(KEY_APPLIED_AT, savedAt)
@@ -408,9 +459,22 @@ class LiveTvDriveSync @Inject constructor(
         applying = true
         appliedAtMs = System.currentTimeMillis()
         try {
-            val before = prefs.exportForSync()
-            val changed = prefs.importFromSync(data)
-            val after = prefs.exportForSync()
+            val before = exportSetup()
+            val selections = if (data.has(TVDB_VERSION)) (1..com.nuvio.tv.core.profile.ProfileManager.MAX_PROFILES).associateWith { id ->
+                data.keys().asSequence().filter { it.startsWith("$TVDB_PREFIX$id:") }.associate {
+                    it.removePrefix("$TVDB_PREFIX$id:") to data.getJSONObject(it).getString("v")
+                }
+            } else emptyMap()
+            selections.values.forEach { com.nuvio.tv.data.tvdb.validateTvdbSelections(it) }
+            val localProfiles = profiles.profilesList.first().associateBy { it.id }
+            selections.filterValues { it.isNotEmpty() }.forEach { (id, _) ->
+                check(data.optJSONObject("$PROFILE_PREFIX$id")?.optString("v") == localProfiles[id]?.name) {
+                    "Backup profiles differ from this TV. Restore the matching Nuvio profiles before restoring their TVDB choices."
+                }
+            }
+            val changed = prefs.importFromSync(liveData(data))
+            selections.forEach { (id, values) -> orders.importSelections(id, values) }
+            val after = exportSetup()
             // What really changed here. Nothing: no reload at all (it used to reload Live TV,
             // reading the guide again, on every sync, often twice at start-up).
             val keys = (before.keys().asSequence() + after.keys().asSequence()).toSet()
@@ -422,7 +486,7 @@ class LiveTvDriveSync @Inject constructor(
             com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Sync: applied changes from your other TV (${keys.take(6).joinToString()}${if (keys.size > 6) "…" else ""})")
             // Download any playlists or guides this TV doesn't have yet, playlists whose address
             // or login changed on the other TV, and rebuild the guide.
-            repository.reloadAfterSync(changed)
+            if (liveData(before).toString() != liveData(after).toString()) repository.reloadAfterSync(changed)
             delay(500)
         } finally {
             applying = false
@@ -431,18 +495,16 @@ class LiveTvDriveSync @Inject constructor(
     }
 
     /** The Drive copy, or null if there isn't one or it can't be read. */
-    private suspend fun remoteCopy(token: String): JSONObject? = runCatching {
+    private suspend fun remoteCopy(token: String): RemoteBackup? {
         val fileId = fileId(token) ?: return null
-        JSONObject(
-            execute(
-                Request.Builder()
-                    .url("https://www.googleapis.com/drive/v3/files/$fileId?alt=media")
-                    .header("Authorization", "Bearer $token")
-                    .get()
-                    .build()
-            )
+        val (text, etag) = executeVersioned(
+            Request.Builder()
+                .url("https://www.googleapis.com/drive/v3/files/$fileId?alt=media")
+                .header("Authorization", "Bearer $token")
+                .get().build()
         )
-    }.getOrNull()
+        return RemoteBackup(JSONObject(text), etag)
+    }
 
     /**
      * Combines two setups setting by setting: whatever this TV changed since the last sync
@@ -456,12 +518,20 @@ class LiveTvDriveSync @Inject constructor(
         localWinsWithoutBase: Boolean,
         removedHere: Set<String>
     ): JSONObject {
+        if (base != null) DriveSyncConflict.requireCompatible(base, local, remote, SOURCE_LISTS)
         if (base == null) {
             // Nothing synced on this TV yet (or since an older version): one side's settings win,
             // but playlists and guides from both are kept. Taking one TV's whole list lost the
             // playlists only the other TVs had.
             val (first, second) = if (localWinsWithoutBase) local to remote else remote to local
             val out = JSONObject(first.toString())
+            second.keys().forEach { key ->
+                if (!out.has(key)) out.put(key, second.get(key))
+                else if (key !in SOURCE_LISTS) {
+                    DriveSyncConflict.requireCompatible(JSONObject(),
+                        JSONObject().put(key, first.get(key)), JSONObject().put(key, second.get(key)), emptySet())
+                }
+            }
             for (k in SOURCE_LISTS) {
                 val a = first.optJSONObject(k)
                 val b = second.optJSONObject(k)
@@ -573,17 +643,25 @@ class LiveTvDriveSync @Inject constructor(
 
     private fun baseFile() = java.io.File(context.filesDir, "livetv_drive_base.json")
 
-    private fun readBase(): JSONObject? = runCatching { JSONObject(baseFile().readText()) }.getOrNull()
+    private fun readBase(): JSONObject? = if (baseFile().exists()) JSONObject(baseFile().readText()) else null
 
     private fun writeBase(data: JSONObject) {
-        runCatching { baseFile().writeText(data.toString()) }
+        val file = android.util.AtomicFile(baseFile())
+        val stream = file.startWrite()
+        try {
+            stream.write(data.toString().toByteArray(Charsets.UTF_8))
+            file.finishWrite(stream)
+        } catch (error: Exception) {
+            file.failWrite(stream)
+            throw error
+        }
     }
 
     // ------------------------------------------------------------------ Google plumbing
 
     /** A valid access token, refreshed when needed. Null (and disconnected) if sign-in was revoked. */
     private suspend fun token(): String? {
-        val refresh = store.getString(KEY_REFRESH, null) ?: return null
+        val refresh = refreshToken() ?: return null
         accessToken?.let { if (System.currentTimeMillis() < accessTokenExpiresAt - 60_000) return it }
         val res = runCatching {
             postForm(
@@ -608,6 +686,7 @@ class LiveTvDriveSync @Inject constructor(
             return null
         }
         if (res.optString("error") == "invalid_grant") {
+            protected.clear()
             store.edit().remove(KEY_REFRESH).apply()
             _state.value = _state.value.copy(connected = false, message = "Google Drive access was removed. Connect again to keep syncing.")
             return null
@@ -633,6 +712,7 @@ class LiveTvDriveSync @Inject constructor(
                 .build()
         )
         val files = JSONObject(text).optJSONArray("files")
+        check((files?.length() ?: 0) <= 1) { "Multiple backups found. Nothing was overwritten." }
         val id = files?.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() } ?: return null
         store.edit().putString(KEY_FILE_ID, id).apply()
         return id
@@ -646,12 +726,15 @@ class LiveTvDriveSync @Inject constructor(
         }
     }
 
-    private suspend fun execute(request: Request): String = withContext(Dispatchers.IO) {
+    private suspend fun execute(request: Request): String = executeVersioned(request).first
+
+    private suspend fun executeVersioned(request: Request): Pair<String, String?> = withContext(Dispatchers.IO) {
         http.newCall(request).execute().use { r ->
             val text = r.body?.string().orEmpty()
             if (r.code == 404) store.edit().remove(KEY_FILE_ID).apply()
+            if (r.code == 412) error("The backup changed on another TV. Sync again before saving.")
             if (!r.isSuccessful) error("HTTP ${r.code}")
-            text
+            text to r.header("ETag")
         }
     }
 
@@ -682,6 +765,9 @@ class LiveTvDriveSync @Inject constructor(
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 
     private companion object {
+        const val PROFILE_PREFIX = "reseq_profile:"
+        const val TVDB_PREFIX = "reseq_tvdb:"
+        const val TVDB_VERSION = "reseq_tvdb_version"
         const val TAG = "LiveTvDriveSync"
         /** Settings that are lists of sources, merged source by source. */
         val SOURCE_LISTS = setOf("playlists", "epg_sources")
@@ -693,7 +779,7 @@ class LiveTvDriveSync @Inject constructor(
             "https://www.googleapis.com/auth/drive.appdata" to MODE_APPDATA,
             "https://www.googleapis.com/auth/drive.file" to MODE_FILE
         )
-        const val FILE_NAME = "Nuvio Live TV backup.json"
+        const val FILE_NAME = "Nuvio ReSeq backup.json"
         val JSON = "application/json; charset=UTF-8".toMediaType()
         const val KEY_REFRESH = "refresh_token"
         const val KEY_EMAIL = "email"
