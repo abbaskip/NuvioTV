@@ -211,10 +211,16 @@ internal class SportsMatcher(private val db: EpgDatabase, private val guideCache
                 if (SportsCatalog.NOT_LIVE_WORDS.any { hasWord(nt, it) }) return@mapNotNull null
                 Triple(key, p, nt to norm(desc))
             }
+            val programmeSports = prepared.associate { (key, p, _) ->
+                (key to p.startMs) to SportsTaxonomy.classifyProgramme(p.title, null)?.let { SportsTaxonomy.sport(it.sportId) }
+            }
             for (ev in slot) {
+                val eventSport = SportsCatalog.league(ev.leagueId)?.sport
                 val t = terms[ev.id] ?: continue
                 for ((key, p, texts) in prepared) {
                     val (nt, nd) = texts
+                    val programmeSport = programmeSports[key to p.startMs]
+                    if (conflictingSports(eventSport, programmeSport) && !t.namesLeague(nt, "")) continue
                     // Disc golf shows never count for regular golf.
                     if (ev.id !in discIds && (hasWord(nt, "disc golf") || hasWord(nd, "disc golf"))) continue
                     if (p.startMs > ev.startMs + 60 * MINUTE || p.stopMs < ev.startMs + 15 * MINUTE) continue
@@ -251,6 +257,8 @@ internal class SportsMatcher(private val db: EpgDatabase, private val guideCache
             // Only channels whose name has one of the game's words can match: look at those, not
             // all of them (with tens of thousands of channels, every game against every channel took minutes).
             forNamed(tokenIndex, t.anchorTokens(ev.id in noStart), names) { ch, nn ->
+                val channelSport = SportsTaxonomy.classifyProgramme(ch.name, null)?.let { SportsTaxonomy.sport(it.sportId) }
+                if (conflictingSports(SportsCatalog.league(ev.leagueId)?.sport, channelSport) && !t.leagueInName(nn)) return@forNamed
                 if (!discEvent && ch.key in discNames) return@forNamed
                 if (t.inName(nn)) { add(ev.id, ch.key, 95, "Channel name", null); byName++ }
                 else if (t.teamChannel(nn, groups[ch.group].orEmpty())) { add(ev.id, ch.key, 65, "Team channel; specific game unconfirmed", null); byName++ }
@@ -681,6 +689,9 @@ internal class SportsMatcher(private val db: EpgDatabase, private val guideCache
         // The listing repeats the whole (multi-word) channel name: filler ("CINE PRO NXT").
         return c.contains(' ') && c.length >= 8 && " $t ".contains(" $c ")
     }
+
+    private fun conflictingSports(event: Sport?, listing: Sport?): Boolean =
+        event != null && listing != null && event != Sport.OTHER && listing != Sport.OTHER && event != listing
 
     private fun termsFor(ev: SportsEvent): Terms {
         val league = SportsCatalog.league(ev.leagueId)

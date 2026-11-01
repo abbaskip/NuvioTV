@@ -58,6 +58,20 @@ class SportsReplayMatcherTest {
         assertEquals(setOf("au", "uk", "dedicated"), result.map { it.channel.key }.toSet())
     }
 
+    @Test fun `explicit other sport defeats a shared complete location but incidental description does not`() {
+        val fixture = SportsEvent("fixture", "racing/f1", now, false, GameState.LIVE,
+            "Mexico City Grand Prix", null, null, null, null, endMs = now + 7_200_000)
+        val rows = listOf("soccer" to EpgProgram(now, now + 7_200_000, "Liga MX Soccer: Club America vs Toluca", "Live from Mexico City."),
+            "valid" to EpgProgram(now, now + 7_200_000, "F1: Mexico City Grand Prix - Soccer news follows", "Soccer news follows the race."))
+        val result = match(listOf(channel("soccer", "CBS Sports Golazo"), channel("valid", "UK Sports")), rows,
+            replay = false, fixture = fixture)
+        assertEquals(listOf("valid"), result.map { it.channel.key })
+        val quick = SportsMatcher(mockk()).match(SportsMatcher.Input(listOf(fixture),
+            listOf(channel("bad", "Basketball: Mexico City Grand Prix"), channel("good", "F1: Mexico City GP"), channel("multi", "Basketball and F1: Mexico City GP")),
+            emptyMap(), 0, SportsSettings(), now, includeGuide = false)).matches[fixture.id].orEmpty()
+        assertEquals(setOf("good", "multi"), quick.map { it.channel.key }.toSet())
+    }
+
     @Test fun `older event can offer an archive broadcaster without retained guide rows`() {
         val channels = match(listOf(channel("archive", "AU: ESPN2 HD")))
         assertEquals(listOf("archive"), channels.map { it.channel.key })
