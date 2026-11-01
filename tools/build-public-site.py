@@ -8,10 +8,11 @@ REPO = 'https://github.com/abbaskip/Nuvio-ReSeq'
 BASE = 'https://abbaskip.github.io/Nuvio-ReSeq/'
 
 def page(filename, title, description, body, active):
+    verification = '<meta name="google-site-verification" content="R_9hOgSvE4jY3-9lySMSr1QCW2t4mqYaMxOKX7l7ts8" />\n' if filename == 'index.html' else ''
     nav = ''.join(f'<a href="{url}"' + (' aria-current="page"' if label == active else '') + f'>{label}</a>' for label, url in [('Home', './'), ('Privacy Policy', 'privacy.html'), ('Terms of Service', 'terms.html'), ('GitHub', REPO)])
     text = f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{escape(title)} · Nuvio ReSeq</title><meta name="description" content="{escape(description, quote=True)}">
+{verification}<title>{escape(title)} · Nuvio ReSeq</title><meta name="description" content="{escape(description, quote=True)}">
 <meta name="theme-color" content="#090d16"><link rel="canonical" href="{BASE + ('' if filename == 'index.html' else filename)}">
 <meta property="og:title" content="{escape(title)} · Nuvio ReSeq"><meta property="og:description" content="{escape(description, quote=True)}"><meta property="og:type" content="website"><meta property="og:image" content="{BASE}assets/logo.png">
 <link rel="icon" href="assets/icon.png" type="image/png"><link rel="stylesheet" href="assets/site.css"></head>
