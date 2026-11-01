@@ -6,6 +6,11 @@ import com.nuvio.tv.ui.theme.NuvioTheme
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.tv.updater.UpdateViewModel
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.BringIntoViewSpec
@@ -156,6 +161,22 @@ fun AboutSettingsContent(
                                     context.startActivity(intent)
                                 }
                             )
+
+                            val activity = LocalActivity.current as? ComponentActivity
+                            if (AppFeaturePolicy.inAppUpdatesEnabled && activity != null) {
+                                // Share the Activity's updater so its existing banner handles the result.
+                                val updater: UpdateViewModel = hiltViewModel(activity)
+                                val updateState by updater.uiState.collectAsStateWithLifecycle()
+                                SettingsActionRow(
+                                    title = stringResource(R.string.about_check_for_updates),
+                                    subtitle = stringResource(
+                                        if (updateState.isChecking) R.string.update_checking
+                                        else R.string.about_check_for_updates_subtitle
+                                    ),
+                                    enabled = !updateState.isChecking,
+                                    onClick = { updater.checkForUpdates(force = true, showNoUpdateFeedback = true) }
+                                )
+                            }
 
                             if (AppFeaturePolicy.supportNuvioEnabled) {
                                 SettingsActionRow(
