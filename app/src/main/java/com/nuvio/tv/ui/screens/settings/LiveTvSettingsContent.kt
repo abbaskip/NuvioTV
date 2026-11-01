@@ -2050,7 +2050,7 @@ private fun DriveSyncCard(
                 )
                 !state.connected -> {
                     Text(
-                        text = "Your playlists, guide settings, Sports Hub preferences and per-profile TVDB order choices are saved privately in your Google Drive. Backups include playlist logins, so keep the backup private. Personal API keys and tracker sign-ins are not included.",
+                        text = "Your playlists, guide settings, Sports Hub preferences and per-profile TVDB order and Shuffle choices are saved privately in your Google Drive. Backups include playlist logins, so keep the backup private. Personal API keys and tracker sign-ins are not included.",
                         style = MaterialTheme.typography.bodySmall,
                         color = NuvioTheme.colors.TextSecondary
                     )
@@ -2287,7 +2287,7 @@ private fun ConfirmDeleteDialog(
 
 /** The restore prompt's text: what's replaced, when the saved copy was made and where, and a warning when it's old. */
 private fun restoreMessage(loaded: Boolean, info: com.nuvio.tv.livetv.sync.LiveTvDriveSync.BackupInfo?, localChangedAt: Long): String {
-    val base = "This TV's Live TV setup, Sports Hub preferences and saved TVDB episode orders are replaced with the copy in Google Drive. Profiles must match; personal API keys and tracker sign-ins are kept on this TV."
+    val base = "This TV's Live TV setup, Sports Hub preferences and saved TVDB episode orders and Shuffle choices are replaced with the copy in Google Drive. Profiles must match; personal API keys and tracker sign-ins are kept on this TV."
     if (!loaded) return "$base\n\nChecking when it was saved…"
     if (info == null || info.savedAtMs <= 0L) return base
     val now = System.currentTimeMillis()

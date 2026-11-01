@@ -29,6 +29,19 @@ class DriveBackupPayloadTest {
     @Test(expected = IllegalArgumentException::class) fun versionMarkerCannotMasqueradeAsAStringPreference() {
         driveBackupData(JSONObject("""{"format":1,"data":{"reseq_tvdb_version":{"t":"str","v":"1"}}}"""))
     }
+    @Test(expected = IllegalArgumentException::class) fun shuffleSectionsNeedTheirVersionMarker() {
+        driveBackupData(JSONObject("""{"format":1,"data":{"reseq_shuffle:1:tmdb:123":{"t":"str","v":"{}"}}}"""))
+    }
+    @Test fun legacyBackupsRemainReadableWithoutInventedShuffleChoices() {
+        val data = driveBackupData(JSONObject("""{"format":1,"data":{}}"""))
+        assertFalse(data.has("reseq_shuffle_version"))
+    }
+    @Test(expected = IllegalStateException::class) fun conflictingShuffleEditsDoNotCombineDifferentPools() {
+        fun snapshot(enabled: Boolean, watched: Boolean) = JSONObject().put("reseq_shuffle:1:tmdb:123", JSONObject().put("t", "str")
+            .put("v", JSONObject().put("enabled", enabled).put("includeWatched", watched).toString()))
+        DriveSyncConflict.requireCompatible(snapshot(true, false), snapshot(true, true), snapshot(false, false), emptySet())
+    }
+
     @Test fun independentFavoriteEditsKeepAdditionsAndExplicitRemovals() {
         fun entry(values: String) = JSONObject("""{"t":"s","v":$values}""")
         val merged = mergedDriveSet(entry("""["a","b"]"""), entry("""["a","c"]"""), entry("""["a","b","d"]"""))!!

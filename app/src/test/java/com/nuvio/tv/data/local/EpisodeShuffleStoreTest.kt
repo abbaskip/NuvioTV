@@ -83,6 +83,42 @@ class EpisodeShuffleStoreTest {
     }
 
     @Test
+    fun `Drive backup roundtrip preserves both pools off choices native IDs and profiles`() = runTest {
+        val store = store()
+        store.save("tmdb:123", EpisodeShuffleSettings(true, true), 1)
+        store.save("tt456", EpisodeShuffleSettings(true, false), 1)
+        store.save("disabled", EpisodeShuffleSettings(false, true), 1)
+        store.save("other profile", EpisodeShuffleSettings(true, false), 2)
+        val exported = store.exportSelections(1)
+        store.importSelections(2, exported)
+        assertEquals(store.observeProfile(1).first().shows, store.observeProfile(2).first().shows)
+        assertEquals(setOf("tmdb:123", "tt456", "disabled"), store.exportSelections(2).keys)
+        assertEquals(EpisodeShuffleSettings(false, true), store.observeProfile(2).first().shows["disabled"])
+        activeProfile.value = 2
+        store.save("tt456", EpisodeShuffleSettings(false, false), 2)
+        assertTrue(store.observeProfile(1).first().shows.getValue("tt456").enabled)
+    }
+
+    @Test
+    fun `fresh profiles export no implicit deletion while explicit off choices survive`() = runTest {
+        val store = store()
+        assertTrue(store.exportSelections(1).isEmpty())
+        store.save("show", EpisodeShuffleSettings(false, true), 1)
+        assertEquals(EpisodeShuffleSettings(false, true), decodeShuffleSelections(store.exportSelections(1))["show"])
+    }
+
+    @Test
+    fun `malformed backup cannot partly replace saved shuffle choices`() = runTest {
+        val store = store()
+        store.save("original", EpisodeShuffleSettings(true, false), 1)
+        val bad = mapOf("new" to """{"enabled":true,"includeWatched":true}""",
+            "bad" to """{"enabled":true,"includeWatched":"false"}""")
+        try { store.importSelections(1, bad); org.junit.Assert.fail("Invalid backup must fail") }
+        catch (_: IllegalArgumentException) { }
+        assertEquals(mapOf("original" to EpisodeShuffleSettings(true, false)), store.observeProfile(1).first().shows)
+    }
+
+    @Test
     fun `empty show ids do not create preferences`() = runTest {
         val store = store()
         store.save(" ", EpisodeShuffleSettings(true, true), 1)
