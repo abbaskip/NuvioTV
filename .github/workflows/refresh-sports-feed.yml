@@ -1,5 +1,14 @@
 name: Refresh sports catalogue
 on:
+  push:
+    branches: [dev]
+    paths:
+      - 'docs/index.html'
+      - 'docs/privacy.html'
+      - 'docs/terms.html'
+      - 'docs/assets/**'
+      - 'tools/build-public-site.py'
+      - '.github/workflows/refresh-sports-feed.yml'
   workflow_dispatch:
   schedule:
     - cron: '17 */6 * * *'
@@ -22,14 +31,25 @@ jobs:
           path: build/sports-feed
           key: sports-feed-v1-${{ github.run_id }}
           restore-keys: sports-feed-v1-
+      - run: python tools/check-public-site.py
       - run: python -m unittest discover -s tools/sports-feed -p 'test_*.py'
       - name: Generate public catalogue
+        if: github.event_name != 'push'
         env:
           THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY || '123' }}
         run: python tools/sports-feed/generate.py
+      - name: Preserve current public catalogue for website-only updates
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p build/sports-feed
+          curl --fail --location --retry 3 --output build/sports-feed/sports-base.json https://abbaskip.github.io/Nuvio-ReSeq/sports-base.json
+          python -c "import json; data=json.load(open('build/sports-feed/sports-base.json')); assert isinstance(data, dict) and data"
       - name: Stage public files only
         run: |
           mkdir -p build/sports-public
+          cp docs/index.html docs/privacy.html docs/terms.html build/sports-public/
+          cp -R docs/assets build/sports-public/
+          touch build/sports-public/.nojekyll
           cp build/sports-feed/sports-base.json build/sports-public/
       - uses: actions/upload-artifact@v4
         with:
