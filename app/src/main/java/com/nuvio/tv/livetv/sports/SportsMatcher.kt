@@ -223,7 +223,7 @@ internal class SportsMatcher(private val db: EpgDatabase, private val guideCache
                     // event, or the competition when nothing else of its kind is on.
                     if (ev.id in noStart) {
                         val hits = specificHits(ev.id, nt) + specificHits(ev.id, nd)
-                        if (!t.namesLeague(nt, nd) && hits < 2) continue
+                        if (!t.namesLeague(nt, nd) && !t.namesEvent(nt, nd)) continue
                         when {
                             score > 0 -> Unit
                             hits >= 1 -> score = 88
@@ -259,7 +259,7 @@ internal class SportsMatcher(private val db: EpgDatabase, private val guideCache
                 else if (ev.id in noStart) {
                     val hits = specificHits(ev.id, nn)
                     when {
-                        (hits >= 1 && t.leagueInName(nn)) || hits >= 2 -> { add(ev.id, ch.key, 90, "Channel name", null); byName++ }
+                        (hits >= 1 && t.leagueInName(nn)) || (hits >= 2 && t.namesEvent(nn, "")) -> { add(ev.id, ch.key, 90, "Channel name", null); byName++ }
                         !namesOther(ev.id, nn) && distinctLeague(ev.id, nn) -> { add(ev.id, ch.key, 78, "Channel name", null); byName++ }
                     }
                 }
@@ -563,6 +563,16 @@ internal class SportsMatcher(private val db: EpgDatabase, private val guideCache
     ) {
         private fun any(text: String, list: List<String>) = list.any { hasWord(text, it) }
 
+        // A location's words scattered across two opponents are not an event identity.
+        private val eventPhrases = eventWords.flatMap { phrase ->
+            val words = phrase.split(' ')
+            val specific = words.filter { it !in GENERIC_TOURNAMENT_WORDS && it !in GENERIC_EVENT_WORDS }
+            listOfNotNull(phrase.takeIf { words.size >= 2 && specific.isNotEmpty() },
+                specific.joinToString(" ").takeIf { specific.size >= 2 })
+        }.distinct()
+
+        fun namesEvent(nt: String, nd: String): Boolean = any(nt, eventPhrases) || any(nd, eventPhrases)
+
         fun scoreText(nt: String, nd: String): Int {
             if (a.isNotEmpty() && b.isNotEmpty()) {
                 val aT = any(nt, a); val bT = any(nt, b)
@@ -579,6 +589,7 @@ internal class SportsMatcher(private val db: EpgDatabase, private val guideCache
                     else -> 0
                 }
             }
+            if (!namesLeague(nt, nd) && !namesEvent(nt, nd)) return 0
             val ew = eventWords.count { hasWord(nt, it) || hasWord(nd, it) }
             val lw = any(nt, leagueWords)
             return when {

@@ -28,6 +28,36 @@ class SportsReplayMatcherTest {
         return SportsMatcher(db).match(SportsMatcher.Input(listOf(fixture), channels, emptyMap(), 0, settings, now, replay, guideAssignments = assignments))
             .matches[fixture.id].orEmpty()
     }
+    @Test fun `event locations cannot be assembled from unrelated opponents but coherent names retain all feeds`() {
+        val cases = listOf(
+            Triple("racing/f1", "Mexico City Grand Prix", "Rapid City Rush vs New Mexico Goatheads"),
+            Triple("golf/pga", "South Carolina Championship", "South Sydney vs Carolina"))
+        for ((id, title, unrelated) in cases) for (timed in listOf(true, false)) {
+            val fixture = SportsEvent("fixture", id, now, timed, GameState.LIVE, title, null, null,
+                null, null, endMs = now + 7_200_000)
+            val channels = listOf(channel("bad", "Flo Hockey: Rapid City Rush vs New Mexico Goatheads"), channel("valid-au", "AU Sports HD"),
+                channel("valid-uk", "UK Sports UHD"), channel("qualified", "Other provider"))
+            val programme = { text: String -> EpgProgram(now, now + 7_200_000, text) }
+            val leagueName = SportsCatalog.league(id)!!.name
+            val rows = listOf("bad" to programme(unrelated), "valid-au" to programme(title),
+                "valid-uk" to programme(title), "qualified" to programme("$leagueName: $title"))
+            val result = match(channels, rows, replay = false, fixture = fixture)
+            assertEquals("$title / timed=$timed", setOf("valid-au", "valid-uk", "qualified"),
+                result.map { it.channel.key }.toSet())
+        }
+    }
+
+    @Test fun `quick event channel matching also requires coherent location identity without a competition label`() {
+        val fixture = SportsEvent("fixture", "racing/f1", now, false, GameState.LIVE,
+            "Mexico City Grand Prix", null, null, null, null, endMs = now + 7_200_000)
+        val channels = listOf(channel("bad", "FloHockey: Rapid City Rush vs New Mexico Goatheads"),
+            channel("au", "AU: Mexico City GP HD"), channel("uk", "UK: Mexico City Grand Prix UHD"),
+            channel("dedicated", "UK: Sky Sports F1 HD"))
+        val result = SportsMatcher(mockk()).match(SportsMatcher.Input(listOf(fixture), channels,
+            emptyMap(), 0, SportsSettings(), now, includeGuide = false)).matches[fixture.id].orEmpty()
+        assertEquals(setOf("au", "uk", "dedicated"), result.map { it.channel.key }.toSet())
+    }
+
     @Test fun `older event can offer an archive broadcaster without retained guide rows`() {
         val channels = match(listOf(channel("archive", "AU: ESPN2 HD")))
         assertEquals(listOf("archive"), channels.map { it.channel.key })
