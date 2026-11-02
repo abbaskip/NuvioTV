@@ -84,7 +84,7 @@ jobs:
           gh release download --repo "$GITHUB_REPOSITORY" --pattern '*universal.apk' --dir build/previous-release
           mapfile -t previous < <(find build/previous-release -name '*.apk')
           test "${#previous[@]}" -eq 1
-          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          tools="$ANDROID_HOME/build-tools/36.0.0"
           python3 scripts/prepare_release_apks.py --apk-dir app/build/outputs/apk/full/release --output-dir build/release --version "$VERSION" --apksigner "$tools/apksigner" --aapt "$tools/aapt" --reference-apk "${previous[0]}"
       - name: Assemble reviewed notes and download guidance
         env:
