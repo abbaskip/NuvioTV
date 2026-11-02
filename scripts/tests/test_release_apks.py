@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from prepare_release_apks import ABIS, PACKAGE, stage, validate_native_outputs
+from prepare_release_apks import ABIS, PACKAGE, certificate, stage, validate_native_outputs
 
 
 class ReleaseApksTest(unittest.TestCase):
@@ -71,3 +71,28 @@ class ReleaseApksTest(unittest.TestCase):
              patch('prepare_release_apks.certificate', side_effect=['permanent-signer', 'different-signer']):
             with self.assertRaisesRegex(ValueError, 'signing'):
                 stage(self.root, self.root / 'staged', '0.1.0-beta.5', 'signer', 'aapt')
+
+    def test_legacy_numbered_signer_output(self):
+        digest = 'ab' * 32
+        with patch('prepare_release_apks.command', return_value=f'Signer #1 certificate SHA-256 digest: {digest}\n'):
+            self.assertEqual(digest, certificate('signer', self.root / 'app.apk'))
+
+    def test_sdk_range_signers_with_same_identity_are_accepted(self):
+        digest = 'ab' * 32
+        output = (f'Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate SHA-256 digest: {digest}\n'
+                  f'Signer (minSdkVersion=24, maxSdkVersion=32) certificate SHA-256 digest: {digest}\n')
+        with patch('prepare_release_apks.command', return_value=output):
+            self.assertEqual(digest, certificate('signer', self.root / 'app.apk'))
+
+    def test_distinct_sdk_range_signing_identities_are_rejected(self):
+        output = ('Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate SHA-256 digest: ' + 'ab' * 32 + '\n'
+                  'Signer (minSdkVersion=24, maxSdkVersion=32) certificate SHA-256 digest: ' + 'cd' * 32 + '\n')
+        with patch('prepare_release_apks.command', return_value=output):
+            with self.assertRaises(ValueError):
+                certificate('signer', self.root / 'app.apk')
+
+    def test_source_stamp_cannot_substitute_for_app_signer(self):
+        output = 'Source Stamp Signer certificate SHA-256 digest: ' + 'ab' * 32 + '\n'
+        with patch('prepare_release_apks.command', return_value=output):
+            with self.assertRaises(ValueError):
+                certificate('signer', self.root / 'app.apk')

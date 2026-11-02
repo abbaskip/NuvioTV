@@ -43,10 +43,14 @@ def command(tool: str, *args: str) -> str:
 
 def certificate(apksigner: str, apk: Path) -> str:
     output = command(apksigner, "verify", "--verbose", "--print-certs", str(apk))
-    digests = re.findall(r"Signer #\d+ certificate SHA-256 digest: (\w+)", output)
+    # v3.1 signatures use SDK-range labels and may repeat one certificate.
+    # Compare unique application signers, excluding source-stamp certificates.
+    digests = {digest.lower() for digest in re.findall(
+        r"^Signer (?:#\d+|\(minSdkVersion=[^\r\n]+\)) certificate SHA-256 digest: ([0-9a-fA-F]{64})[ \t]*$",
+        output, re.MULTILINE)}
     if len(digests) != 1:
-        raise ValueError(f"Expected one verified signer: {apk.name}")
-    return digests[0]
+        raise ValueError(f"Expected one unique verified signer, found {len(digests)}: {apk.name}")
+    return next(iter(digests))
 
 
 def identity(aapt: str, apk: Path) -> tuple[str, int, str]:
