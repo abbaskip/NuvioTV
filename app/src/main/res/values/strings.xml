@@ -3421,4 +3421,6 @@
     <string name="autosync_label_synced">Auto synced</string>
     <string name="stream_resume_from_time">Resume from %1$s</string>
     <string name="stream_resume_from_percent">Resume from %1$d%%</string>
+    <string name="about_check_for_updates">Check for updates</string>
+    <string name="about_check_for_updates_subtitle">Look for a newer version of Nuvio ReSeq.</string>
 </resources>

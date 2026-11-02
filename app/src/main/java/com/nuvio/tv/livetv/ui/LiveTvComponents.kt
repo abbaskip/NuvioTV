@@ -363,6 +363,7 @@ internal fun LiveFocusRow(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     onFocused: (() -> Unit)? = null,
+    horizontalPadding: Dp = 14.dp,
     content: @Composable RowScope.(focused: Boolean) -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -383,7 +384,7 @@ internal fun LiveFocusRow(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = horizontalPadding, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {

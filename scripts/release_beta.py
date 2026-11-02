@@ -19,7 +19,7 @@ DEFAULT_BETA_NOTICE = (
     "## This is a beta version intended for testing only. Expect breaking changes "
     "in updates. Back up your settings before updating."
 )
-EXPECTED_ASSET_NAMES = ["Nuvio-ReSeq-v<version>-universal.apk"]
+EXPECTED_ASSET_NAMES = [f"Nuvio-ReSeq-v<version>-{abi}.apk" for abi in ("universal", "armeabi-v7a", "arm64-v8a", "x86", "x86_64")] + ["SHA256SUMS.txt", "DOWNLOADS.md"]
 
 VERSION_NAME_RE = re.compile(r'(?m)^(\s*versionName\s*=\s*")([^"]+)(")')
 VERSION_CODE_RE = re.compile(r"(?m)^(\s*versionCode\s*=\s*)(\d+)")
@@ -320,19 +320,20 @@ def build_release() -> list[Path]:
     if os.environ.get("CI_USE_DEBUG_SIGNING", "").lower() == "true":
         raise SystemExit("Public ReSeq releases require the permanent release key.")
     subprocess.run(
-        ["./gradlew", ":app:assembleFullRelease", "-PuseLocalFfmpegDecoder=false"],
+        ["./gradlew.bat" if os.name == "nt" else "./gradlew", ":app:assembleFullRelease", "-PuseLocalFfmpegDecoder=false"],
         cwd=ROOT,
         check=True,
         text=True,
     )
-    source = APK_DIR / "app-full-universal-release.apk"
-    if not source.is_file():
-        raise SystemExit(f"No universal Full Release APK found in {APK_DIR}")
+    from prepare_release_apks import stage
     version, _ = parse_versions(read_build_file())
-    RELEASE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    asset = RELEASE_OUTPUT_DIR / f"Nuvio-ReSeq-v{version}-universal.apk"
-    shutil.copy2(source, asset)
-    return [asset]
+    sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+    if not sdk:
+        raise SystemExit("ANDROID_HOME is required to verify APK signing and metadata")
+    tools = sorted((Path(sdk) / "build-tools").iterdir(), key=lambda p: tuple(int(n) for n in p.name.split(".") if n.isdigit()))[-1]
+    return stage(APK_DIR, RELEASE_OUTPUT_DIR, version,
+                 str(tools / ("apksigner.bat" if os.name == "nt" else "apksigner")),
+                 str(tools / ("aapt.exe" if os.name == "nt" else "aapt")))
 
 
 def commit_tag_push(
@@ -392,7 +393,7 @@ def create_github_release(
         "release",
         "create",
         release_tag,
-        *[str(asset) for asset in assets],
+        "--draft",
         "--title",
         release_title,
         "--notes-file",
@@ -401,11 +402,15 @@ def create_github_release(
     prerelease = is_github_prerelease(release_tag)
     if prerelease:
         command.append("--prerelease")
-    if draft:
-        command.append("--draft")
-    elif not prerelease:
-        command.append("--latest")
     subprocess.run(command, cwd=ROOT, check=True, text=True)
+    # Keep the validated staging order, especially x86 before x86_64 for older updaters.
+    for asset in assets:
+        subprocess.run(["gh", "release", "upload", release_tag, str(asset)], cwd=ROOT, check=True, text=True)
+    if not draft:
+        publish = ["gh", "release", "edit", release_tag, "--draft=false"]
+        if not prerelease:
+            publish.append("--latest")
+        subprocess.run(publish, cwd=ROOT, check=True, text=True)
 
 
 def parse_args() -> argparse.Namespace:
@@ -600,6 +605,10 @@ def main() -> int:
     assets: list[Path] = []
     try:
         assets = build_release()
+        guidance = next(asset for asset in assets if asset.name == "DOWNLOADS.md")
+        notes_text = notes_path.read_text(encoding="utf-8")
+        if "## APK downloads" not in notes_text:
+            notes_path.write_text(notes_text.rstrip() + "\n\n" + guidance.read_text(encoding="utf-8"), encoding="utf-8")
         print("Built release assets:")
         for asset in assets:
             print(f"- {asset.relative_to(ROOT)}")

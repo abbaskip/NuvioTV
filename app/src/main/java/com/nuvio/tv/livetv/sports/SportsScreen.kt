@@ -168,6 +168,7 @@ fun SportsScreen(
     val problem by viewModel.problem.collectAsStateWithLifecycle()
     val hasChannels by viewModel.hasChannels.collectAsStateWithLifecycle()
     val playingKey by viewModel.playingKey.collectAsStateWithLifecycle()
+    val previewState by viewModel.previewState.collectAsStateWithLifecycle()
     val backdrop by viewModel.backdrop.collectAsStateWithLifecycle()
 
     var day by rememberSaveable { mutableIntStateOf(0) }
@@ -384,7 +385,7 @@ fun SportsScreen(
         }
         // The picture, on top of the page where its slot is (one view for every page, so it
         // never restarts), then the rounded corners and the "nothing playing" note over it.
-        if (videoOn) VideoLayer(slot, root, playerRef ?: viewModel.player, playing = playingKey != null, backdrop = backdrop, onAttached = { viewModel.onSurfaceAttached() })
+        if (videoOn) VideoLayer(slot, root, playerRef ?: viewModel.player, playing = previewState.hasPreviewContent, label = previewState.catchupTitle ?: viewModel.playback.playingChannel?.name, backdrop = backdrop, onAttached = { viewModel.onSurfaceAttached() })
     }
     if (sportsPreferences) SportsPreferencesDialog(settings.excludedSportsNodes,
         region = SportsCatalog.regionOf(settings), onRegion = { region -> viewModel.repo.updateSettings { it.copy(region = region) } },
@@ -419,7 +420,7 @@ private fun VideoSlot(modifier: Modifier, onBounds: (Rect?) -> Unit) {
 }
 
 @Composable
-private fun VideoLayer(slot: Rect?, root: Rect?, player: androidx.media3.common.Player?, playing: Boolean, backdrop: String, onAttached: () -> Unit) {
+private fun VideoLayer(slot: Rect?, root: Rect?, player: androidx.media3.common.Player?, playing: Boolean, label: String?, backdrop: String, onAttached: () -> Unit) {
     val density = LocalDensity.current
     val placed = slot != null && root != null && slot.width > 1f
     val place = if (placed) with(density) {
@@ -460,6 +461,9 @@ private fun VideoLayer(slot: Rect?, root: Rect?, player: androidx.media3.common.
                 LiveText("Pick a game to watch here", color = Color.White, size = 14.sp, weight = FontWeight.Bold)
                 LiveText("Hold OK on a game, or open it and pick a channel", color = SportsLook.Dim, size = 11.sp)
             }
+        } else if (!label.isNullOrBlank()) {
+            LiveText(label, color = Color.White, size = 11.sp,
+                modifier = Modifier.align(Alignment.BottomStart).background(Color.Black.copy(alpha = 0.65f)).padding(8.dp))
         }
     }
 }

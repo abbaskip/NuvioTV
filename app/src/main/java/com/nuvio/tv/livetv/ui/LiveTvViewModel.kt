@@ -14,7 +14,6 @@ import com.nuvio.tv.livetv.model.LiveTvSettings
 import com.nuvio.tv.livetv.model.LiveUserState
 import com.nuvio.tv.livetv.model.ZapMode
 import com.nuvio.tv.livetv.player.LivePlaybackState
-import com.nuvio.tv.livetv.model.forPlaylist
 import com.nuvio.tv.livetv.player.LiveTvPlaybackController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -167,15 +166,15 @@ class LiveTvViewModel @Inject constructor(
      * app (guide, full screen and search share it) instead of once per screen.
      */
     val selectedPlaylistId: StateFlow<String?> = session.currentPlaylistId
-    val displayChannels: StateFlow<List<LiveChannel>> = combine(
-        channelStore.displayChannels, selectedPlaylistId
-    ) { channels, sourceId -> channels.forPlaylist(sourceId) }
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    // Playlist navigation jumps within one continuous group list; it does not filter it.
+    val displayChannels: StateFlow<List<LiveChannel>> = channelStore.displayChannels
+
+    fun highlightPlaylist(sourceId: String?) { session.currentPlaylistId.value = sourceId }
 
     fun selectPlaylist(sourceId: String?) {
-        session.currentPlaylistId.value = sourceId
-        selectGroup(ChannelGroup.ALL)
+        highlightPlaylist(sourceId)
+        val group = sourceId?.let { id -> uiState.value.groups.firstOrNull { !it.special && it.sourceId == id } }
+        selectGroup(group?.id ?: ChannelGroup.ALL)
     }
 
     val uiState: StateFlow<LiveTvUiState> = combine(
@@ -1062,7 +1061,7 @@ class LiveTvViewModel @Inject constructor(
 
     /** Playlist id -> name, for the playlist headings in the group list. */
     val playlistNames: StateFlow<Map<String, String>> = prefs.playlists
-        .map { list -> list.associate { it.id to it.name } }
+        .map { list -> list.filter { it.liveEnabled }.associate { it.id to it.name } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     /** Playlists folded away in the group list (kept while the app is open). */

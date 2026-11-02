@@ -1584,7 +1584,7 @@ internal fun LiveTvSettingsContent(
                 },
                 // Xtream: which stream format to ask for. Auto follows what the account allows.
                 *(if (d.source.isXtream) arrayOf<Pair<String, () -> Unit>>(
-                    "Stream format: " + when (d.source.streamFormat) { "ts" -> "TS"; "m3u8" -> "HLS (m3u8)"; else -> "Auto" } to {
+                    "Stream format: " + when (d.source.streamFormat) { "ts" -> "MPEG-TS"; "m3u8" -> "HLS"; else -> "Auto" } to {
                         val next = when (d.source.streamFormat) { "auto" -> "ts"; "ts" -> "m3u8"; else -> "auto" }
                         viewModel.savePlaylist(d.source.copy(streamFormat = next))
                         close()

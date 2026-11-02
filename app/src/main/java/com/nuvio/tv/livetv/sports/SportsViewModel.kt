@@ -81,6 +81,10 @@ class SportsViewModel @Inject constructor(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    // The window shares the controller with Live TV, including catch-up and recordings.
+    // playingKey is intentionally live-only for event badges; it cannot describe an empty window.
+    val previewState = playback.state
+
     /** Something is playing (or starting) in the window, not paused: the TV stays awake. */
     val playingNow: StateFlow<Boolean> = playback.state
         .map { it.channelKey != null && (it.isPlaying || it.isBuffering) && !it.userPaused }
