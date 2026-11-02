@@ -2480,12 +2480,8 @@ class LiveTvRepository @Inject constructor(
     /** Stream formats the provider allows for the account being loaded (from user_info). */
     @Volatile private var allowedFormats: Set<String> = emptySet()
 
-    private fun xtreamExtension(pl: PlaylistSource): String = when (pl.streamFormat) {
-        "ts" -> "ts"
-        "m3u8" -> "m3u8"
-        // Auto: .ts unless the provider only allows HLS.
-        else -> if (allowedFormats.isNotEmpty() && "ts" !in allowedFormats && "m3u8" in allowedFormats) "m3u8" else "ts"
-    }
+    private fun xtreamExtension(pl: PlaylistSource): String =
+        xtreamLiveExtension(pl.streamFormat, allowedFormats)
 
     private fun writeXtreamPlaylist(pl: PlaylistSource, url: String, categories: Map<String, String>, target: File) {
         val ext = xtreamExtension(pl)

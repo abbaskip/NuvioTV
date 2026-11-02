@@ -4,38 +4,26 @@ import android.os.Build
 import com.nuvio.tv.data.remote.dto.GitHubAssetDto
 
 internal object AbiSelector {
+    private val knownAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 
-    private val knownAbis = listOf(
-        "arm64-v8a",
-        "armeabi-v7a",
-        "x86_64",
-        "x86"
-    )
-
-    fun chooseBestApkAsset(assets: List<GitHubAssetDto>): GitHubAssetDto? {
-        val apkAssets = assets.filter { it.name.endsWith(".apk", ignoreCase = true) }
-        if (apkAssets.isEmpty()) return null
-        if (apkAssets.size == 1) return apkAssets.first()
-
-        val supported = Build.SUPPORTED_ABIS?.toList().orEmpty()
-
-        // Prefer exact ABI match (in device preference order)
-        for (abi in supported) {
-            val candidate = apkAssets.firstOrNull { it.name.contains(abi, ignoreCase = true) }
-            if (candidate != null) return candidate
+    fun chooseBestApkAsset(
+        assets: List<GitHubAssetDto>,
+        supportedAbis: List<String> = Build.SUPPORTED_ABIS?.toList().orEmpty()
+    ): GitHubAssetDto? {
+        val apks = assets.filter { it.name.endsWith(".apk", ignoreCase = true) }
+        // Universal remains the automatic-update default, independent of asset order.
+        apks.firstOrNull { hasToken(it.name, "universal") }?.let { return it }
+        for (abi in supportedAbis) {
+            apks.firstOrNull { asset ->
+                // Match the longest known ABI first: x86_64 is never an x86 APK.
+                knownAbis.firstOrNull { hasToken(asset.name, it) } == abi
+            }?.let { return it }
         }
-
-        // Fallback to a universal APK if present
-        val universal = apkAssets.firstOrNull {
-            val n = it.name.lowercase()
-            n.contains("universal") || n.contains("all") || n.contains("universal-release")
-        }
-        if (universal != null) return universal
-
-        // If we can at least avoid wrong-ABI picks, prefer APKs that don't mention a known ABI.
-        val noAbiMention = apkAssets.firstOrNull { asset ->
-            knownAbis.none { abi -> asset.name.contains(abi, ignoreCase = true) }
-        }
-        return noAbiMention ?: apkAssets.first()
+        // Retain old single, unlabelled universal releases. Never fall back to a
+        // labelled incompatible build, even if it is the release's only asset.
+        return apks.singleOrNull()?.takeIf { asset -> knownAbis.none { hasToken(asset.name, it) } }
     }
+
+    private fun hasToken(name: String, token: String): Boolean =
+        Regex("(?:^|[-_.])${Regex.escape(token)}(?=[-_.]|$)", RegexOption.IGNORE_CASE).containsMatchIn(name)
 }

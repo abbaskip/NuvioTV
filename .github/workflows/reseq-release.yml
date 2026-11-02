@@ -1,0 +1,124 @@
+name: ReSeq signed APK release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish after validation (otherwise create a draft)
+        type: boolean
+        default: false
+      notes:
+        description: Repository path to reviewed release notes
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reseq-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Resolve version and reject duplicate releases
+        id: version
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          from pathlib import Path
+          text = Path('app/build.gradle.kts').read_text(encoding='utf-8-sig')
+          version = re.search(r'versionName\s*=\s*"([^"]+)"', text)[1]
+          print(f'name={version}')
+          print(f'tag=v{version}')
+          PY
+          tag="$(sed -n 's/^tag=//p' "$GITHUB_OUTPUT" | tail -1)"
+          if git rev-parse --verify --quiet "refs/tags/$tag" || gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release/tag already exists: $tag" >&2
+            exit 1
+          fi
+      - name: Configure permanent signing and app services
+        env:
+          APP_CONFIG: ${{ secrets.LOCAL_PROPERTIES_BASE64 }}
+          KEYSTORE: ${{ secrets.NUVIO_RELEASE_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.NUVIO_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.NUVIO_RELEASE_KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.NUVIO_RELEASE_STORE_PASSWORD }}
+        run: |
+          test -n "$APP_CONFIG" && test -n "$KEYSTORE" && test -n "$KEY_ALIAS" && test -n "$KEY_PASSWORD" && test -n "$STORE_PASSWORD"
+          printf '%s' "$APP_CONFIG" | base64 --decode > local.properties
+          sed -i -E '/^[[:space:]]*(sdk\.dir|NUVIO_RELEASE_STORE_FILE)[[:space:]]*=/d' local.properties
+          for property in GOOGLE_DRIVE_CLIENT_ID GOOGLE_DRIVE_CLIENT_SECRET NUVIO_SUPABASE_URL NUVIO_SUPABASE_ANON_KEY TRAKT_CLIENT_ID; do
+            grep -Eq "^${property}=.+" local.properties || { echo "Missing required service configuration: $property" >&2; exit 1; }
+          done
+          printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/reseq.jks"
+          echo "NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/reseq.jks" >> "$GITHUB_ENV"
+          echo "NUVIO_RELEASE_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "NUVIO_RELEASE_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+          echo "NUVIO_RELEASE_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
+      - name: Test Live TV, Sports and updater; build all APKs
+        run: |
+          PYTHONPATH=scripts python3 -m unittest discover -s scripts/tests -v
+          ./gradlew :app:testFullReleaseUnitTest --tests 'com.nuvio.tv.livetv.*' --tests 'com.nuvio.tv.updater.*' :app:assembleFullRelease -PuseLocalFfmpegDecoder=false -Pkotlin.compiler.execution.strategy=in-process --max-workers=2 --stacktrace
+      - name: Verify signing, upgrade identity and native libraries
+        env:
+          VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          mkdir -p build/previous-release
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern '*universal.apk' --dir build/previous-release
+          mapfile -t previous < <(find build/previous-release -name '*.apk')
+          test "${#previous[@]}" -eq 1
+          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          python3 scripts/prepare_release_apks.py --apk-dir app/build/outputs/apk/full/release --output-dir build/release --version "$VERSION" --apksigner "$tools/apksigner" --aapt "$tools/aapt" --reference-apk "${previous[0]}"
+      - name: Assemble reviewed notes and download guidance
+        env:
+          NOTES_PATH: ${{ inputs.notes }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path.cwd().resolve()
+          notes = (root / os.environ['NOTES_PATH']).resolve()
+          if not notes.is_relative_to(root) or not notes.is_file():
+              raise SystemExit('Release notes must be an existing repository file')
+          Path('build/release-notes.md').write_text(notes.read_text() + '\n\n' + Path('build/release/DOWNLOADS.md').read_text())
+          PY
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ReSeq-${{ steps.version.outputs.name }}-verified-apks
+          path: build/release/*
+          if-no-files-found: error
+      - name: Publish one release from this exact commit
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.name }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          args=("$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Nuvio ReSeq $VERSION" --notes-file build/release-notes.md)
+          # Stage all assets in a draft; old updaters must see x86 before x86_64.
+          # Upload serially because parallel uploads can reorder GitHub's asset list.
+          gh release create "${args[@]}" --draft
+          for abi in universal armeabi-v7a arm64-v8a x86 x86_64; do
+            gh release upload "$TAG" "build/release/Nuvio-ReSeq-v$VERSION-$abi.apk" --repo "$GITHUB_REPOSITORY"
+          done
+          gh release upload "$TAG" build/release/SHA256SUMS.txt build/release/DOWNLOADS.md --repo "$GITHUB_REPOSITORY"
+          # ReSeq has one update channel; beta-labelled versions are regular releases.
+          if [[ "$PUBLISH" == true ]]; then
+            gh release edit "$TAG" --draft=false --latest --repo "$GITHUB_REPOSITORY"
+          fi
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/reseq.jks" local.properties

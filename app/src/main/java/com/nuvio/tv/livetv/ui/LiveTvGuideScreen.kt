@@ -278,6 +278,8 @@ fun LiveTvGuideScreen(
 
     val gridFocus = remember { FocusRequester() }
     val groupsFocus = remember { FocusRequester() }
+    val playlistsFocus = remember { FocusRequester() }
+    var playlistFocused by remember { mutableStateOf(false) }
     val contentFocus = LocalContentFocusRequester.current
 
     var column by remember { mutableStateOf(GuideColumn.CHANNEL) }
@@ -335,25 +337,6 @@ fun LiveTvGuideScreen(
     val collapsedPlaylists by viewModel.collapsedPlaylists.collectAsStateWithLifecycle()
     LaunchedEffect(playlistNames) {
         if (playlistNames.isNotEmpty() && selectedPlaylistId != null && selectedPlaylistId !in playlistNames) viewModel.selectPlaylist(null)
-    }
-    var playlistPickerOpen by remember { mutableStateOf(false) }
-    if (playlistPickerOpen) {
-        LiveDialog(onDismiss = { playlistPickerOpen = false }) {
-            LiveText("Choose playlist")
-            LazyColumn {
-                item { MenuItem("All playlists") {
-                    viewModel.selectPlaylist(null)
-                    playlistPickerOpen = false
-                } }
-                items(playlistNames.toList(), key = { it.first }) { (id, name) ->
-                    MenuItem(name) {
-                        viewModel.selectPlaylist(id)
-                        if (id in collapsedPlaylists) viewModel.togglePlaylistCollapsed(id)
-                        playlistPickerOpen = false
-                    }
-                }
-            }
-        }
     }
     var savedMovedKey by remember { mutableStateOf<String?>(null) }
     var visibilityChannels by remember { mutableStateOf<List<LiveChannel>>(emptyList()) }
@@ -495,6 +478,14 @@ fun LiveTvGuideScreen(
                 if (runCatching { groupsFocus.requestFocus() }.isSuccess) break
                 runCatching { groupsListState.scrollToItem((idx - 3).coerceAtLeast(0)) }
             }
+        }
+    }
+
+    // Cycling playlists keeps the target group visible without taking focus from the selector.
+    LaunchedEffect(playlistFocused, ui.selectedGroupId, collapsedPlaylists) {
+        if (playlistFocused && groupsOpen) {
+            val index = groupListIndex(guideGroups, ui.selectedGroupId, settings.groupPlaylistHeadings, collapsedPlaylists)
+            if (index >= 0) groupsListState.scrollToItem((index - 3).coerceAtLeast(0))
         }
     }
 
@@ -829,7 +820,8 @@ fun LiveTvGuideScreen(
 
     /**
      * Left. A tap on what's on now opens the groups (catch-up or not). Holding Left on a
-     * catch-up channel goes back into earlier shows; once you're there, each Left steps back.
+     * catch-up channel goes back into earlier shows when nothing is playing; while playing,
+     * the guide-level hold handler returns to full screen. Rewind also browses earlier shows.
      */
     fun moveLeft(held: Boolean = false) {
         val ch = focusedChannel ?: return
@@ -869,6 +861,12 @@ fun LiveTvGuideScreen(
     var headerGlassBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     // Only a Back press that *started* in the guide counts as "hold Back" here.
     var backPressStartedHere by remember { mutableStateOf(false) }
+    val keyView = androidx.compose.ui.platform.LocalView.current
+    var replayingLeft by remember { mutableStateOf(false) }
+    var leftStarted by remember { mutableStateOf<android.view.KeyEvent?>(null) }
+    var leftHoldFired by remember { mutableStateOf(false) }
+    var leftHoldJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    DisposableEffect(Unit) { onDispose { leftHoldJob?.cancel() } }
     // Guide left alone for 2 minutes while a channel plays in the preview, with the guide itself
     // on screen (not a menu, a dialog or the side menu): back to full screen.
     var lastKeyAt by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -908,6 +906,11 @@ fun LiveTvGuideScreen(
             }
             .onPreviewKeyEvent { e ->
                 lastKeyAt = System.currentTimeMillis()
+                // Swallow the rest of a hold even after the video has grown.
+                if (e.key == Key.DirectionLeft && leftHoldFired) {
+                    if (e.type == KeyEventType.KeyUp) { leftHoldFired = false; leftStarted = null }
+                    return@onPreviewKeyEvent true
+                }
                 // Full screen handles its own keys.
                 if (fullscreen) return@onPreviewKeyEvent false
                 val playingNow = playback.channelKey != null
@@ -922,6 +925,43 @@ fun LiveTvGuideScreen(
                         }
                         goFullscreen()
                     }
+                }
+                // Defer the tap until release so a hold cannot navigate first. Replaying
+                // both events preserves each focused control's existing short-Left action.
+                if (e.key == Key.DirectionLeft && !replayingLeft && (playingNow || leftStarted != null)) {
+                    val native = e.nativeKeyEvent
+                    if (e.type == KeyEventType.KeyDown && native.repeatCount == 0) {
+                        leftStarted = android.view.KeyEvent(native)
+                        leftHoldJob?.cancel()
+                        leftHoldJob = scope.launch {
+                            delay(GUIDE_LEFT_HOLD_MS)
+                            if (leftStarted != null && viewModel.playbackState.value.channelKey != null) {
+                                leftHoldFired = true
+                                returnToPlaying()
+                            }
+                        }
+                    } else if (e.type == KeyEventType.KeyDown && leftStarted != null && playingNow &&
+                        isGuideLeftHold(native.eventTime - native.downTime, native.isLongPress)) {
+                        leftHoldJob?.cancel()
+                        leftHoldFired = true
+                        returnToPlaying()
+                    } else if (e.type == KeyEventType.KeyUp) {
+                        leftHoldJob?.cancel()
+                        val down = leftStarted
+                        leftStarted = null
+                        if (down != null) {
+                            if (!native.isCanceled && isGuideLeftHold(native.eventTime - down.downTime, native.isLongPress) && playingNow) {
+                                returnToPlaying()
+                            } else if (!native.isCanceled) {
+                                replayingLeft = true
+                                try {
+                                    keyView.dispatchKeyEvent(down)
+                                    keyView.dispatchKeyEvent(native)
+                                } finally { replayingLeft = false }
+                            }
+                        }
+                    }
+                    return@onPreviewKeyEvent true
                 }
                 // Play/Pause on the remote: straight to full screen on what's playing. Works on
                 // every remote, including ones that can't report a held Back button.
@@ -1004,13 +1044,47 @@ fun LiveTvGuideScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(start = 56.dp)
+                    .padding(start = 20.dp)
             ) {
                 val groupsWidth by androidx.compose.animation.core.animateDpAsState(
                     targetValue = if (groupsOpen) 190.dp * guideScale(settings).coerceAtLeast(1f) else 0.dp,
                     animationSpec = androidx.compose.animation.core.tween(220),
                     label = "groupsWidth"
                 )
+                if (groupsWidth > 1.dp) Column(
+                    Modifier.width(72.dp).fillMaxHeight().padding(end = 6.dp)
+                        .focusRequester(playlistsFocus)
+                        .onFocusChanged { playlistFocused = it.hasFocus }
+                        .onPreviewKeyEvent { e ->
+                            if (e.key == Key.DirectionLeft || e.key == Key.DirectionRight ||
+                                e.key == Key.DirectionUp || e.key == Key.DirectionDown) {
+                                if (e.type == KeyEventType.KeyDown) when (e.key) {
+                                    Key.DirectionLeft -> openSidebar()
+                                    Key.DirectionRight -> focusGroups()
+                                    else -> {
+                                        val ids = listOf<String?>(null) + playlistNames.keys
+                                        val current = ids.indexOf(selectedPlaylistId).coerceAtLeast(0)
+                                        val delta = if (e.key == Key.DirectionUp) -1 else 1
+                                        val id = ids[Math.floorMod(current + delta, ids.size)]
+                                        pendingGroupId = null
+                                        viewModel.selectPlaylist(id)
+                                        if (id in collapsedPlaylists) id?.let { viewModel.togglePlaylistCollapsed(it) }
+                                    }
+                                }
+                                true
+                            } else false
+                        }
+                ) {
+                    LiveText("Playlists", color = NuvioTheme.colors.TextSecondary, size = 11.sp)
+                    LiveFocusRow(Modifier.fillMaxWidth(), onClick = { focusGroups() }, horizontalPadding = 6.dp) { focused ->
+                        val sourceId = if (playlistFocused) selectedPlaylistId else ui.groups.firstOrNull {
+                            it.id == (pendingGroupId ?: ui.selectedGroupId)
+                        }?.sourceId
+                        LiveText(sourceId?.let { playlistNames[it] } ?: "All playlists",
+                            color = focusedTextColor(focused), size = 11.sp, maxLines = 2)
+                    }
+                    if (playlistFocused) LiveText("▲ ▼  Change", color = NuvioTheme.colors.TextSecondary, size = 10.sp)
+                }
                 if (groupsWidth > 1.dp) androidx.compose.runtime.CompositionLocalProvider(LocalGuideScale provides guideScale(settings)) { GroupColumn(
                     width = groupsWidth,
                     // A channel row's height minus its 2dp above and below.
@@ -1033,8 +1107,12 @@ fun LiveTvGuideScreen(
                         if (ui.selectedGroupId in groupHiddenPending) viewModel.selectGroup(ui.defaultGroupId)
                         groupVisibilityList = null
                     },
-                    playlistLabel = selectedPlaylistId?.let { playlistNames[it] } ?: "All playlists",
-                    onChoosePlaylist = { playlistPickerOpen = true },
+                    onLeft = {
+                        viewModel.highlightPlaylist(ui.groups.firstOrNull {
+                            it.id == (pendingGroupId ?: ui.selectedGroupId)
+                        }?.sourceId)
+                        runCatching { playlistsFocus.requestFocus() }
+                    },
                     playlistNames = playlistNames,
                     showPlaylistHeadings = settings.groupPlaylistHeadings,
                     collapsed = collapsedPlaylists,
@@ -2752,8 +2830,7 @@ private fun GroupColumn(
     onRight: () -> Unit,
     /** Holding Up while on the first group: on to the ⚙ in the top bar. */
     onLongUpAtTop: () -> Unit = {},
-    playlistLabel: String = "All playlists",
-    onChoosePlaylist: (() -> Unit)? = null,
+    onLeft: () -> Unit = {},
     playlistNames: Map<String, String> = emptyMap(),
     collapsed: Set<String> = emptySet(),
     onToggleCollapse: (String) -> Unit = {},
@@ -2803,7 +2880,9 @@ private fun GroupColumn(
                     } else if (isOk && e.type == KeyEventType.KeyUp) onReorderDone()
                     return@onPreviewKeyEvent true
                 }
-                if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionRight) {
+                if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft) {
+                    onLeft(); true
+                } else if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionRight) {
                     onRight(); true
                 } else if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionUp && e.nativeKeyEvent.repeatCount >= 2 &&
                     reorderingId == null && hiddenPending == null &&
@@ -2814,11 +2893,6 @@ private fun GroupColumn(
                 } else false
             }
     ) {
-        onChoosePlaylist?.let { choose ->
-            LiveFocusRow(modifier = Modifier.fillMaxWidth(), onClick = choose) { focused ->
-                LiveText(playlistLabel, color = focusedTextColor(focused))
-            }
-        }
         // Search sits above the groups (it opens Nuvio's search), in the row beside the timeline.
         groups.firstOrNull { it.id == ChannelGroup.SEARCH }?.let { searchGroup ->
             GroupSearchButton(
